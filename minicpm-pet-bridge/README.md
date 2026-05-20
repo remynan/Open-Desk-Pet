@@ -86,10 +86,10 @@ REPL 命令（在 `你 ▶ ` 提示后输入）：
 **可选：服务模式（如果想多端共享同一个加载好的模型）**
 
 ```bash
-# 终端 B：起 HTTP 服务（等价于以前的 server.py + 浏览器访问 http://127.0.0.1:8765）
+# 终端 B：起 HTTP 服务（等价于以前的 server.py + 浏览器访问 http://127.0.0.1:18765）
 ./start.sh
 # 终端 C：用 chat.py 连这个服务
-python chat.py --server http://127.0.0.1:8765
+python chat.py --server http://127.0.0.1:18765
 ```
 
 > 没启动桌宠也能正常聊天，桥接会静默丢弃推送事件。
@@ -100,7 +100,7 @@ python chat.py --server http://127.0.0.1:8765
 python server.py \
   --model ../models/minicpm5-0.9b \
   --host 127.0.0.1 \
-  --port 8765 \
+  --port 18765 \
   --dtype auto         # auto | bfloat16 | float16 | float32
   --device mps         # mps | cuda | cpu，默认自动
   --no-pet             # 关闭桌宠状态推送

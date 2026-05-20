@@ -31,7 +31,11 @@ const isLinux = process.platform === "linux";
 const WIN_TOPMOST_LEVEL = "pop-up-menu";
 const LINUX_WINDOW_TYPE = "splash";
 
-const DEFAULT_PORT = 8765;
+// Port chosen to dodge common collisions on dev machines: 8765 is used
+// by Apache CouchDB tests, Bitcoin Cash testnet, and a few other tools.
+// 18765 ("1" prefix on the old default) is unassigned by IANA and easy
+// to remember. Override via MINICPM_PORT env if you need something else.
+const DEFAULT_PORT = 18765;
 const DEFAULT_HOST = "127.0.0.1";
 const BUBBLE_GAP = 8;   // pixels between visible pet sprite and bubble
 const EDGE_MARGIN = 8;
@@ -43,13 +47,50 @@ const SPEAK_MAX_HEIGHT = 360;
 const MIN_WIDTH = 100;
 const MIN_HEIGHT = 40;
 
-// ── locate the Python bridge dir / Python interpreter ───────────────────────
+// ── locate sidecar binary / Python bridge dir / Python interpreter ─────────
+//
+// Three runtime modes, in priority order:
+//   A. Packaged app    → PyInstaller binary at <resourcesPath>/sidecar-bin/
+//                         (the only path real users ever hit)
+//   B. Dev with venv   → minicpm-pet-bridge-uv/.venv/bin/python (uv sync)
+//   C. Legacy conda    → ~/miniconda3/envs/minicpm-pet/bin/python (kept for
+//                         contributors who haven't migrated to uv yet)
+//
+// MINICPM_BRIDGE_DIR / MINICPM_PYTHON / MINICPM_SIDECAR_BIN env vars
+// override every mode for local debugging.
+
+function locateSidecarBinary(appRoot) {
+  const override = process.env.MINICPM_SIDECAR_BIN;
+  if (override && fs.existsSync(override)) return path.resolve(override);
+  if (app && app.isPackaged) {
+    // electron-builder puts our PyInstaller dir under
+    //   <Contents>/Resources/sidecar-bin/         (macOS .app bundle)
+    //   <install>/resources/sidecar-bin/          (Windows / Linux)
+    const ext = process.platform === "win32" ? ".exe" : "";
+    const candidates = [
+      path.join(process.resourcesPath, "sidecar-bin", "minicpm-sidecar" + ext),
+      path.join(process.resourcesPath, "sidecar-bin", "minicpm-sidecar", "minicpm-sidecar" + ext),
+    ];
+    for (const c of candidates) {
+      try { if (fs.statSync(c).isFile()) return c; } catch {}
+    }
+  }
+  return null;
+}
 
 function locateBridgeDir(appRoot) {
   const candidates = [
     process.env.MINICPM_BRIDGE_DIR,
+    // Packaged path — server.py lives next to the binary so updater.py
+    // and clawd_state.py imports keep working when the sidecar binary
+    // is bypassed (e.g. dev override pointing at a stale venv).
+    app && app.isPackaged
+      ? path.join(process.resourcesPath, "minicpm-pet-bridge")
+      : null,
+    // Dev preferred: uv-managed venv.
+    path.join(appRoot, "..", "minicpm-pet-bridge-uv"),
+    // Dev legacy: conda-managed source.
     path.join(appRoot, "..", "minicpm-pet-bridge"),
-    path.join(os.homedir(), "Downloads", "Minicpm", "minicpm-pet-bridge"),
   ].filter(Boolean);
   for (const c of candidates) {
     try {
@@ -59,10 +100,26 @@ function locateBridgeDir(appRoot) {
   return null;
 }
 
-function locatePython() {
+function locatePython(appRoot) {
+  // 1. Explicit override always wins.
   const explicit = process.env.MINICPM_PYTHON;
-  if (explicit && fs.existsSync(explicit)) return { python: explicit, viaShell: false };
+  if (explicit && fs.existsSync(explicit)) {
+    return { python: explicit, viaShell: false };
+  }
 
+  // 2. Dev venv created by `uv sync` in minicpm-pet-bridge-uv/.
+  //    This is the recommended dev path now that go.sh exists.
+  const venvCandidates = [
+    path.join(appRoot, "..", "minicpm-pet-bridge-uv", ".venv", "bin", "python"),
+    path.join(appRoot, "..", "minicpm-pet-bridge-uv", ".venv", "bin", "python3"),
+    // Windows layout when we eventually add it
+    path.join(appRoot, "..", "minicpm-pet-bridge-uv", ".venv", "Scripts", "python.exe"),
+  ];
+  for (const p of venvCandidates) {
+    try { if (fs.statSync(p).isFile()) return { python: p, viaShell: false }; } catch {}
+  }
+
+  // 3. Legacy conda env (mac/linux), for contributors who still have it.
   const envName = process.env.MINICPM_CONDA_ENV || "minicpm-pet";
   const condaCandidates = [
     path.join(os.homedir(), "miniconda3", "envs", envName, "bin", "python"),
@@ -72,10 +129,9 @@ function locatePython() {
     path.join("/opt", "homebrew", "Caskroom", "miniconda", "base", "envs", envName, "bin", "python"),
   ];
   for (const p of condaCandidates) {
-    try {
-      if (fs.statSync(p).isFile()) return { python: p, viaShell: false };
-    } catch {}
+    try { if (fs.statSync(p).isFile()) return { python: p, viaShell: false }; } catch {}
   }
+
   return { python: null, viaShell: true, condaEnv: envName };
 }
 
@@ -114,14 +170,75 @@ function httpJson(method, urlStr, body, timeoutMs = 4000) {
 // ── Sidecar manager ─────────────────────────────────────────────────────────
 
 class Sidecar {
-  constructor({ bridgeDir, port, host, log }) {
+  constructor({ bridgeDir, sidecarBin, appRoot, port, host, log, logFile }) {
     this.bridgeDir = bridgeDir;
+    // Optional PyInstaller binary; when set we skip the Python interpreter
+    // lookup entirely. Populated in packaged builds via electron-builder
+    // extraResources → resources/sidecar-bin/.
+    this.sidecarBin = sidecarBin || null;
+    this.appRoot = appRoot || null;
     this.port = port;
     this.host = host;
     this.log = log || (() => {});
     this.proc = null;
     this.starting = null;
     this.stderrTail = [];
+    // Append-mode file stream where every stdout / stderr line from the
+    // sidecar gets persisted to <userData>/logs/sidecar.log. Critical
+    // for packaged builds where console.log goes nowhere.
+    this.logFile = logFile || null;
+    this._fileStream = null;
+    this._fileSizeBudget = 2 * 1024 * 1024; // 2 MB before rotate
+    this._fileBytesWritten = 0;
+  }
+
+  _openLogStream() {
+    if (!this.logFile) return null;
+    if (this._fileStream) return this._fileStream;
+    try {
+      fs.mkdirSync(path.dirname(this.logFile), { recursive: true });
+      // Pre-rotate if the existing file is already over budget so we
+      // start clean each app launch (or restart of the sidecar).
+      try {
+        const st = fs.statSync(this.logFile);
+        if (st.size > this._fileSizeBudget) {
+          fs.renameSync(this.logFile, this.logFile + ".1");
+        }
+      } catch {}
+      this._fileStream = fs.createWriteStream(this.logFile, { flags: "a" });
+      this._fileBytesWritten = 0;
+      const ts = new Date().toISOString();
+      this._fileStream.write(`\n===== sidecar session ${ts} (host=${this.host} port=${this.port}) =====\n`);
+    } catch (err) {
+      this.log(`[minicpm-chat] open log file failed: ${err && err.message}`);
+    }
+    return this._fileStream;
+  }
+
+  _appendLog(line) {
+    const stream = this._openLogStream();
+    if (!stream) return;
+    try {
+      const chunk = line.endsWith("\n") ? line : line + "\n";
+      stream.write(chunk);
+      this._fileBytesWritten += Buffer.byteLength(chunk);
+      // Soft rotate: when the stream grows past budget, roll over once.
+      // We do this lazily so we don't fsync on every line.
+      if (this._fileBytesWritten > this._fileSizeBudget) {
+        try {
+          stream.end();
+          fs.renameSync(this.logFile, this.logFile + ".1");
+        } catch {}
+        this._fileStream = null;
+        this._fileBytesWritten = 0;
+      }
+    } catch {}
+  }
+
+  // Pull last N stderr chunks (raw) for inclusion in error toasts /
+  // crash dumps.
+  _stderrTailString(maxChars = 1500) {
+    return (this.stderrTail.join("").trim().slice(-maxChars)) || "(no stderr)";
   }
 
   baseUrl() { return `http://${this.host}:${this.port}`; }
@@ -166,82 +283,160 @@ class Sidecar {
   }
 
   async _spawnAndWait(initialModelDir) {
-    if (!this.bridgeDir) {
-      throw new Error("找不到 minicpm-pet-bridge 目录。请设置 MINICPM_BRIDGE_DIR 环境变量。");
+    // We need at least one of (PyInstaller binary, Python source) to spawn.
+    if (!this.sidecarBin && !this.bridgeDir) {
+      throw new Error("找不到 sidecar。打包模式下应内置 sidecar-bin/，开发模式请设置 MINICPM_BRIDGE_DIR 或 uv sync。");
     }
 
-    const { python, viaShell, condaEnv } = locatePython();
-    // NOTE: no --no-pet — we *want* the Python server to push states to the
-    // local clawd-on-desk HTTP endpoint (port 23333) so the pet animates
-    // along with the conversation.
-    const args = [
-      "server.py",
+    // PyInstaller binary takes both `server.py`-equivalent args as flags;
+    // Python interpreter mode prepends `server.py` because cwd is the
+    // bridge dir.
+    const argsCommon = [
       "--host", this.host,
       "--port", String(this.port),
     ];
-    if (initialModelDir) args.push("--model", initialModelDir);
+    if (initialModelDir) argsCommon.push("--model", initialModelDir);
 
     const env = {
       ...process.env,
       PYTHONUNBUFFERED: "1",
+      // Belt-and-suspenders for Apple Silicon: any op MPS can't lower
+      // (some MiniCPM5 GQA / matmul shapes still hit
+      // "Failed to infer result type(s) for mps.matmul" in MPSGraph)
+      // falls back to CPU instead of crashing the process.
+      PYTORCH_ENABLE_MPS_FALLBACK: process.env.PYTORCH_ENABLE_MPS_FALLBACK || "1",
+      // Point the sidecar's own RotatingFileHandler at the same folder
+      // the Electron host writes to. Result: both `sidecar.log` (what
+      // the parent saw) and `sidecar-internal.log` (full Python tracebacks)
+      // sit side by side, easy to grab via Settings → "打开日志目录".
+      MINICPM_LOG_DIR: this.logFile ? path.dirname(this.logFile) : (process.env.MINICPM_LOG_DIR || ""),
     };
     // Auto-discover a LoRA adapter if the user hasn't explicitly set one.
-    // We look at <repo-root>/adapters/ for any directory containing an
-    // adapter_config.json. Convention: that dir's name is exposed via
-    // MINICPM_ADAPTER and used by the sidecar.
+    // Looks at <packaged resources>/adapters/ in production or
+    // <repo-root>/adapters/ in dev mode.
     if (!env.MINICPM_ADAPTER) {
-      try {
-        const adaptersRoot = path.resolve(this.bridgeDir, "..", "adapters");
-        const stat = fs.statSync(adaptersRoot);
-        if (stat.isDirectory()) {
+      const adapterCandidates = [];
+      if (app && app.isPackaged) {
+        adapterCandidates.push(path.join(process.resourcesPath, "adapters"));
+      }
+      if (this.bridgeDir) {
+        adapterCandidates.push(path.resolve(this.bridgeDir, "..", "adapters"));
+      }
+      if (this.appRoot) {
+        adapterCandidates.push(path.resolve(this.appRoot, "..", "adapters"));
+      }
+      outer: for (const adaptersRoot of adapterCandidates) {
+        try {
+          if (!fs.statSync(adaptersRoot).isDirectory()) continue;
           for (const name of fs.readdirSync(adaptersRoot)) {
             const cand = path.join(adaptersRoot, name);
             if (fs.existsSync(path.join(cand, "adapter_config.json"))) {
               env.MINICPM_ADAPTER = cand;
               this.log(`[minicpm-chat] auto-detected LoRA adapter: ${cand}`);
-              break;
+              break outer;
             }
           }
-        }
-      } catch {}
+        } catch {}
+      }
     }
 
     let proc;
-    if (python) {
-      this.log(`[minicpm-chat] spawn ${python} server.py --port ${this.port}`);
-      proc = spawn(python, args, { cwd: this.bridgeDir, env });
-    } else if (viaShell) {
-      const cmd = [
-        `eval "$(conda shell.bash hook)"`,
-        `conda activate ${condaEnv}`,
-        `exec python ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`,
-      ].join(" && ");
-      this.log(`[minicpm-chat] spawn via shell (conda env: ${condaEnv})`);
-      proc = spawn("/bin/bash", ["-lc", cmd], { cwd: this.bridgeDir, env });
+    if (this.sidecarBin) {
+      // Production path: a self-contained PyInstaller binary. No Python
+      // interpreter required on the host.
+      this.log(`[minicpm-chat] spawn binary ${this.sidecarBin} --port ${this.port}`);
+      proc = spawn(this.sidecarBin, argsCommon, {
+        cwd: this.bridgeDir || path.dirname(this.sidecarBin),
+        env,
+      });
     } else {
-      throw new Error("找不到 Python 解释器。请先 `conda create -n minicpm-pet python=3.11` 并 pip install requirements.txt。");
+      // Dev path: locate a Python interpreter and run server.py from the
+      // bridge dir.
+      const { python, viaShell, condaEnv } = locatePython(this.appRoot || path.dirname(this.bridgeDir));
+      const args = ["server.py", ...argsCommon];
+
+      if (python) {
+        this.log(`[minicpm-chat] spawn ${python} server.py --port ${this.port}`);
+        proc = spawn(python, args, { cwd: this.bridgeDir, env });
+      } else if (viaShell) {
+        const cmd = [
+          `eval "$(conda shell.bash hook)"`,
+          `conda activate ${condaEnv}`,
+          `exec python ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`,
+        ].join(" && ");
+        this.log(`[minicpm-chat] spawn via shell (conda env: ${condaEnv})`);
+        proc = spawn("/bin/bash", ["-lc", cmd], { cwd: this.bridgeDir, env });
+      } else {
+        throw new Error(
+          "找不到 Python 解释器。请安装应用打包版（推荐），或 cd minicpm-pet-bridge-uv && uv sync。"
+        );
+      }
     }
 
     this.proc = proc;
     this.stderrTail.length = 0;
 
-    proc.stdout.on("data", (b) => this.log(`[sidecar] ${b.toString().trimEnd()}`));
+    // Make sure the log file is open for the new session.
+    this._openLogStream();
+    this._appendLog(`[spawn] ${this.sidecarBin || "python"} (pid=${proc.pid})`);
+
+    proc.stdout.on("data", (b) => {
+      const s = b.toString();
+      this.log(`[sidecar] ${s.trimEnd()}`);
+      this._appendLog(`[stdout] ${s.trimEnd()}`);
+    });
     proc.stderr.on("data", (b) => {
       const s = b.toString();
       this.log(`[sidecar! ] ${s.trimEnd()}`);
+      this._appendLog(`[stderr] ${s.trimEnd()}`);
       this.stderrTail.push(s);
       if (this.stderrTail.length > 40) this.stderrTail.shift();
     });
     proc.on("exit", (code, signal) => {
       this.log(`[minicpm-chat] sidecar exited code=${code} signal=${signal}`);
+      this._appendLog(`[exit] code=${code} signal=${signal}`);
+      // If the process died with a non-zero exit (and wasn't a clean
+      // SIGTERM from our own stop()), archive the recent stderr tail as
+      // a standalone crash dump so we can investigate after restart.
+      const crashed = (typeof code === "number" && code !== 0) ||
+                       (signal && signal !== "SIGTERM");
+      if (crashed && this.logFile) {
+        try {
+          const dir = path.dirname(this.logFile);
+          const ts = new Date().toISOString().replace(/[:.]/g, "-");
+          const dump = path.join(dir, `sidecar-crash-${ts}.log`);
+          const header =
+            `# sidecar crash dump\n` +
+            `# at:    ${new Date().toISOString()}\n` +
+            `# code:  ${code}\n` +
+            `# sig:   ${signal}\n` +
+            `# pid:   ${proc.pid}\n` +
+            `# bin:   ${this.sidecarBin || "python"}\n` +
+            `# port:  ${this.port}\n` +
+            `\n----- stderr tail -----\n`;
+          fs.writeFileSync(dump, header + this._stderrTailString(8000), "utf-8");
+          // Prune to the 5 most recent crash dumps.
+          try {
+            const files = fs.readdirSync(dir)
+              .filter((f) => f.startsWith("sidecar-crash-"))
+              .sort()
+              .reverse();
+            for (const old of files.slice(5)) {
+              try { fs.unlinkSync(path.join(dir, old)); } catch {}
+            }
+          } catch {}
+          this.log(`[minicpm-chat] crash dump → ${dump}`);
+        } catch (err) {
+          this.log(`[minicpm-chat] failed to write crash dump: ${err && err.message}`);
+        }
+      }
       if (this.proc === proc) this.proc = null;
     });
 
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline) {
       if (!this.proc) {
-        const tail = this.stderrTail.join("").trim().slice(-1500) || "(no stderr)";
-        throw new Error(`Python 进程提前退出。stderr 末尾：\n${tail}`);
+        throw new Error(`Python 进程提前退出。stderr 末尾：\n${this._stderrTailString(1500)}`);
       }
       if (await this.isHealthy()) return { status: "started" };
       await new Promise((r) => setTimeout(r, 500));
@@ -327,11 +522,28 @@ function computeBubbleBoundsForSide(side, petBounds, workArea, width, height, op
 module.exports = function initMinicpmChat(ctx) {
   const appRoot = path.resolve(__dirname, "..");
   const bridgeDir = locateBridgeDir(appRoot);
+  const sidecarBin = locateSidecarBinary(appRoot);
   const port = Number(process.env.MINICPM_PORT || DEFAULT_PORT);
   const host = process.env.MINICPM_HOST || DEFAULT_HOST;
   const log = (msg) => { try { console.log(msg); } catch {} };
 
-  const sidecar = new Sidecar({ bridgeDir, port, host, log });
+  if (sidecarBin) log(`[minicpm-chat] using packaged sidecar binary: ${sidecarBin}`);
+
+  // Resolve <userData>/logs/ once so every consumer can point at the
+  // same directory (sidecar stream + crash dumps + Settings "open log
+  // folder" button).
+  function getLogsDir() {
+    try { return path.join(app.getPath("userData"), "logs"); }
+    catch { return path.join(os.tmpdir(), "minicpm-logs"); }
+  }
+  const logsDir = getLogsDir();
+  try { fs.mkdirSync(logsDir, { recursive: true }); } catch {}
+  const sidecarLogPath = path.join(logsDir, "sidecar.log");
+
+  const sidecar = new Sidecar({
+    bridgeDir, sidecarBin, appRoot, port, host, log,
+    logFile: sidecarLogPath,
+  });
 
   let bubble = null;
   let activeSide = "right";
@@ -396,6 +608,49 @@ module.exports = function initMinicpmChat(ctx) {
     return chatParams;
   }
   function getChatParams() { return { ...chatParams }; }
+
+  // ── Model directory resolution ─────────────────────────────────────────
+  // Production: <userData>/models/minicpm5-0.9b/ (downloaded by Onboarding).
+  // Dev: <repo>/models/minicpm5-0.9b/ (the existing convention).
+  // Users can override via Settings → MiniCPM → 本地模型路径 (writes
+  // minicpm-prefs.json model_dir field), or MINICPM_MODEL_DIR env at launch.
+  const MODEL_DIRNAME = "minicpm5-0.9b";
+  function getUserDataDir() {
+    try { return app.getPath("userData"); } catch { return os.tmpdir(); }
+  }
+  function getDefaultModelDir() {
+    if (app && app.isPackaged) {
+      return path.join(getUserDataDir(), "models", MODEL_DIRNAME);
+    }
+    return path.resolve(appRoot, "..", "models", MODEL_DIRNAME);
+  }
+  function getEffectiveModelDir() {
+    if (process.env.MINICPM_MODEL_DIR) return process.env.MINICPM_MODEL_DIR;
+    try {
+      const raw = JSON.parse(fs.readFileSync(PARAMS_PATH, "utf-8"));
+      if (raw && typeof raw.model_dir === "string" && raw.model_dir.trim()) {
+        return raw.model_dir.trim();
+      }
+    } catch {}
+    return getDefaultModelDir();
+  }
+  function setEffectiveModelDir(dir) {
+    let raw = {};
+    try { raw = JSON.parse(fs.readFileSync(PARAMS_PATH, "utf-8")) || {}; } catch {}
+    if (typeof dir === "string" && dir.trim()) {
+      raw.model_dir = dir.trim();
+    } else {
+      delete raw.model_dir;
+    }
+    try { fs.writeFileSync(PARAMS_PATH, JSON.stringify(raw, null, 2), "utf-8"); }
+    catch (err) { log(`[minicpm] model_dir save failed: ${err && err.message}`); }
+    return getEffectiveModelDir();
+  }
+  function isModelPresent(dir) {
+    try {
+      return fs.statSync(path.join(dir || getEffectiveModelDir(), "config.json")).isFile();
+    } catch { return false; }
+  }
 
   // ── Bubble position (side preference + drag offset) ───────────────────
   // Persisted alongside chat params in the same JSON file. The Settings
@@ -930,7 +1185,9 @@ module.exports = function initMinicpmChat(ctx) {
   async function warmup() {
     try {
       log("[minicpm-chat] warming up sidecar in background…");
-      const r = await sidecar.ensureRunning(null);
+      // Pass the user-effective model dir so the sidecar's `--model` flag
+      // tracks Settings changes / Onboarding downloads without restart.
+      const r = await sidecar.ensureRunning(getEffectiveModelDir());
       log(`[minicpm-chat] sidecar warmup ${r.status}`);
       void refreshUpdateStatus();
       void refreshPersona();
@@ -1084,7 +1341,9 @@ module.exports = function initMinicpmChat(ctx) {
     }),
     "minicpm:start": async (_evt, opts = {}) => {
       try {
-        const r = await sidecar.ensureRunning(opts.modelDir || null);
+        // Default to the user-effective dir; opts.modelDir still wins
+        // when callers want a one-off override.
+        const r = await sidecar.ensureRunning(opts.modelDir || getEffectiveModelDir());
         return { ok: true, status: r.status, url: sidecar.baseUrl() };
       } catch (err) {
         return { ok: false, error: String(err && err.message || err) };
@@ -1264,6 +1523,117 @@ module.exports = function initMinicpmChat(ctx) {
       narrationEnabled = !!(payload && payload.enabled);
       return { ok: true, enabled: narrationEnabled };
     },
+
+    // ── Accelerator / device manual override ────────────────────────────
+    "minicpm-settings:list-devices": async () => {
+      const r = await httpJson("GET", `${sidecar.baseUrl()}/api/devices`, null, 2000).catch(() => null);
+      return r ? r.json : null;
+    },
+    "minicpm-settings:set-device": async (_evt, payload) => {
+      const device = (payload && payload.device) || "";
+      // Persist for the next sidecar spawn even if /api/set-device is
+      // unreachable (sidecar may have crashed). MINICPM_DEVICE is the
+      // single source of truth our server.py reads at start.
+      process.env.MINICPM_DEVICE = device;
+      try {
+        await httpJson("POST", `${sidecar.baseUrl()}/api/set-device`, { device }, 1500);
+      } catch {}
+      return { ok: true, device, note: "下次 sidecar 重启时生效" };
+    },
+    "minicpm-settings:restart-sidecar": async () => {
+      try {
+        sidecar.stop();
+        await new Promise((r) => setTimeout(r, 600));
+        const r = await sidecar.ensureRunning(getEffectiveModelDir());
+        return { ok: true, status: r && r.status };
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    },
+
+    // ── Local model directory override ──────────────────────────────────
+    "minicpm-settings:get-model-dir": async () => ({
+      current: getEffectiveModelDir(),
+      default: getDefaultModelDir(),
+      present: isModelPresent(),
+    }),
+    "minicpm-settings:pick-model-dir": async () => {
+      const { dialog } = require("electron");
+      const ret = await dialog.showOpenDialog({
+        title: "选择 MiniCPM 模型目录",
+        properties: ["openDirectory"],
+        message: "目录中必须包含 config.json",
+      });
+      if (ret.canceled || !ret.filePaths.length) return { ok: false, canceled: true };
+      const dir = ret.filePaths[0];
+      if (!fs.existsSync(path.join(dir, "config.json"))) {
+        return { ok: false, error: `所选目录不包含 config.json：\n${dir}` };
+      }
+      setEffectiveModelDir(dir);
+      return { ok: true, modelDir: dir };
+    },
+    "minicpm-settings:reset-model-dir": async () => {
+      setEffectiveModelDir(null);
+      return { ok: true, modelDir: getDefaultModelDir() };
+    },
+
+    // ── Onboarding rerun (dev / recovery) ───────────────────────────────
+    "minicpm-settings:rerun-onboarding": async () => {
+      // Delete the sentinel and tell main.js to relaunch. main.js will
+      // see shouldShow()===true on next boot and open the wizard.
+      try {
+        const sentinelPath = path.join(app.getPath("userData"), "minicpm-onboarding.json");
+        if (fs.existsSync(sentinelPath)) fs.unlinkSync(sentinelPath);
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+      // Don't call app.relaunch() here directly — the renderer expects an
+      // explicit "yes I want to restart" confirmation. The handler just
+      // marks the file; the Settings UI shows a "重启应用" button afterwards.
+      return { ok: true };
+    },
+    "minicpm-settings:relaunch-app": async () => {
+      // Hard-restart so the new sentinel state takes effect cleanly.
+      setTimeout(() => {
+        app.relaunch();
+        app.quit();
+      }, 100);
+      return { ok: true };
+    },
+
+    // ── Logs (sidecar.log + crash dumps) ────────────────────────────────
+    "minicpm-settings:get-logs-info": async () => {
+      const entries = [];
+      try {
+        for (const name of fs.readdirSync(logsDir)) {
+          try {
+            const st = fs.statSync(path.join(logsDir, name));
+            entries.push({
+              name,
+              size: st.size,
+              mtime: st.mtime.toISOString(),
+            });
+          } catch {}
+        }
+      } catch {}
+      entries.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+      return {
+        dir: logsDir,
+        sidecarLog: sidecarLogPath,
+        entries,
+      };
+    },
+    "minicpm-settings:open-logs-dir": async () => {
+      const { shell } = require("electron");
+      try { fs.mkdirSync(logsDir, { recursive: true }); } catch {}
+      try {
+        const err = await shell.openPath(logsDir);
+        if (err) return { ok: false, error: err };
+        return { ok: true, dir: logsDir };
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    },
     "minicpm-settings:get-chat-params": async () => ({
       params: getChatParams(),
       defaults: { ...DEFAULT_CHAT_PARAMS },
@@ -1364,6 +1734,24 @@ module.exports = function initMinicpmChat(ctx) {
     ipcMain.handle(ch, fn);
   }
 
+  // Stop the running sidecar (if any) and immediately restart it. Used
+  // after settings changes that the engine reads at construction time
+  // only — accelerator (MINICPM_DEVICE) and the active model directory.
+  async function restartSidecar() {
+    try { sidecar.stop(); } catch {}
+    // Give the OS a beat to release the port before re-binding.
+    await new Promise((r) => setTimeout(r, 600));
+    return sidecar.ensureRunning(getEffectiveModelDir());
+  }
+
+  // Boot or attach to the sidecar and wait until /api/health returns
+  // ok. Unlike `warmup()`, this surface bubbles failures upwards — the
+  // Onboarding wizard needs to *know* if spawn failed so it can show a
+  // proper error message instead of hitting ECONNREFUSED later on.
+  async function ensureSidecarReady() {
+    return sidecar.ensureRunning(getEffectiveModelDir());
+  }
+
   return {
     open,
     toggle,
@@ -1377,7 +1765,17 @@ module.exports = function initMinicpmChat(ctx) {
     isOpen: () => bubbleShown && !!(bubble && !bubble.isDestroyed()),
     reposition,
     shutdown,
+    restartSidecar,
+    ensureSidecarReady,
     getSidecarUrl: () => sidecar.baseUrl(),
     getBridgeDir: () => bridgeDir,
+    getSidecarBinary: () => sidecarBin,
+    getLogsDir: () => logsDir,
+    getSidecarLogPath: () => sidecarLogPath,
+    // Model directory introspection — consumed by Onboarding + Settings.
+    getModelDir: () => getEffectiveModelDir(),
+    getDefaultModelDir,
+    setModelDir: (dir) => setEffectiveModelDir(dir),
+    isModelPresent: () => isModelPresent(),
   };
 };

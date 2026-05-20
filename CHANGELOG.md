@@ -1,3 +1,93 @@
+# v0.3 — 2026-05-20
+
+## 重构主线：从 "clone + ./go.sh" 转为 "下载 dmg + 双击安装"
+
+本轮的目标是让普通用户不再需要懂终端 / Python / conda / uv，仅通过双击安装包和 UI 引导就能跑起来。当前仅 mac arm64 单端 MVP。
+
+### 新增
+
+#### Onboarding 首次启动引导
+- 全新 5 步引导窗口（独立 BrowserWindow）：
+  1. 环境检查（磁盘 / 网络 / 平台）
+  2. 加速器探测（自动选 MPS / CUDA / CPU + 手动覆盖）
+  3. 模型下载（从 Hugging Face 拉取 ~2 GB，SSE 实时进度条；可改选本地路径）
+  4. sidecar 启动 + warmup
+  5. 就绪——桌宠登场
+- 完成态通过 `<userData>/minicpm-onboarding.json` sentinel 持久化；删除该文件可强制重弹。
+- 渲染端走 contextBridge：`window.onboarding.{getState, listDevices, selectDevice, startModelDownload, pickLocalModel, warmup, complete, onProgress}`。
+
+#### Sidecar 新端点
+- `GET /api/devices` — 列出可用加速器与推荐项
+- `POST /api/set-device` — 持久化用户的加速器手动选择（写入 `MINICPM_DEVICE`，sidecar 重启后生效）
+- `GET /api/onboarding` — 当前模型 / 设备 / 阶段状态快照
+
+#### Settings tab 扩展
+`Settings → 🐾 MiniCPM` 新增 3 个区：
+- **加速器**：下拉切换 MPS / CUDA / CPU，"立即重启 sidecar" 按钮立刻生效
+- **模型路径**：可手选本地目录（必须含 `config.json`），或重置回 `<userData>/models/`
+- **高级 / 开发**：标记重新引导 + 立即重启应用
+
+#### PyInstaller 打包
+- `build/sidecar.spec`：Mac arm64 单文件 sidecar binary，包含 torch / transformers / peft / fastapi 全套
+- `build/build-sidecar.sh`：一站式构建脚本，输出到 `clawd-on-desk/dist/sidecar/mac-arm64/`
+- `npm run build:mac:mvp`：sidecar build → electron-builder → dmg
+- `npm run build:mac:repack`：跳过 sidecar build，仅重打 dmg
+- `./go.sh build`：开发者快捷一键
+
+#### 跨平台 spawn 改造
+- [`clawd-on-desk/src/minicpm-chat.js`](clawd-on-desk/src/minicpm-chat.js)：`locateSidecarBinary` / `locateBridgeDir` / `locatePython` 重构为三段优先级：
+  1. env override (`MINICPM_SIDECAR_BIN` / `MINICPM_BRIDGE_DIR` / `MINICPM_PYTHON`)
+  2. packaged binary (`<resourcesPath>/sidecar-bin/`)
+  3. dev venv (`minicpm-pet-bridge-uv/.venv/bin/python`)
+- Sidecar 类新增 `sidecarBin` 路径分支：packaged 模式直接 spawn binary，跳过 Python 解释器查找。
+- 模型路径决策迁到 `<userData>/models/minicpm5-0.9b/`（packaged）/ `<repo>/models/`（dev）。
+
+#### electron-builder
+- `package.json` `build.extraResources` 接入 sidecar binary、LoRA adapters、sidecar 源码（备用）。
+- `build:mac:mvp` 脚本：先构建 PyInstaller binary，再出 dmg。
+
+### 改动
+
+- `updater.py` 默认源从 mock 切到 `hf://openbmb/MiniCPM5-0.9B`，原 mock 路径仍可通过 `MINICPM_UPDATE_SOURCE=mock://...` 覆盖。
+- `updater.py` 加 `_atomic_move`：`os.replace` 跨卷失败时回退 `shutil.move`（Win 跨盘符场景）。
+- `server.py` `_pick_dtype`：CUDA 老 GPU（SM<8.0）自动 fp16；CPU 默认 fp32。
+- `server.py` `--model` 现在读 `MINICPM_MODEL_DIR` env 优先（被 Electron 注入）。
+- `server.py` `--device` 读 `MINICPM_DEVICE` env，`auto` 归一化为自动探测。
+- `go.sh` 顶部加 banner："开发者快捷脚本"；新增 `build` 子命令。
+- `README.md` 重写：用户向放最前，开发者部分简短引到 `docs/development.md`。
+- `skills/deploy-minicpm-pet/SKILL.md` 顶部标注 "仅开发者用"。
+
+### 修复
+
+- 同步缺失的 `minicpm-pet-bridge-uv/clawd_state.py`（之前 uv 版 server.py 引用了但文件不在）。
+
+### 新增文件
+
+- `clawd-on-desk/src/minicpm-onboarding.js` / `.html` / `.css` / `-renderer.js` / `preload-minicpm-onboarding.js`
+- `build/sidecar.spec` / `build/build-sidecar.sh`
+- `docs/development.md`
+- `docs/PRD-sidecar-cross-platform-refactor.md` (本轮重构前撰写)
+- `docs/architecture-and-cross-platform-report.md` (本轮重构前撰写)
+
+### 实际产物 (在本机 Mac arm64 上验证)
+
+- `clawd-on-desk/dist/sidecar/mac-arm64/`：PyInstaller 产物，~120 MB（其中可执行 57 MB + `_internal/` 60 MB）
+- `clawd-on-desk/dist/mac-arm64/Clawd on Desk.app/`：Resources 内含 sidecar-bin/ + adapters/ + minicpm-pet-bridge/
+  - 若开发机钥匙串里有 Apple Developer ID 证书，.app 会被自动签名；否则保持未签名
+- `clawd-on-desk/dist/Clawd on Desk-0.7.1-arm64.dmg`：**310 MB**（远低于 PRD 设的 1.5 GB 上限）
+- dmg 本身未签名 / 未公证（用户首次启动需手动绕 Gatekeeper：右键打开 或 `xattr -cr`）
+
+### 已知限制 (MVP)
+
+- 仅 macOS arm64；Intel / Windows / Linux 留待后续
+- dmg 容器未签名 / .app 公证未做（即便 .app 签名了，首次启动仍弹 Gatekeeper 警告）
+- 未接 electron-updater 自动更新
+- 模型下载仅 Hugging Face 单源（ModelScope 备用源待开发）
+- 无断点续传 UI（底层 huggingface_hub 已支持）
+- 国内网络环境下，初次打包需要给整个 build 过程开代理（dmg-builder bundle 走 GitHub Release，无官方镜像）
+
+---
+
 # v0.2 — 2026-05-18
 
 ## 新增

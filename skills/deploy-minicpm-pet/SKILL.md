@@ -1,14 +1,17 @@
 ---
 name: deploy-minicpm-pet
 description: >-
-  Deploy / set up the MiniCPM-test project (local MiniCPM5-0.9B model + Electron desktop pet).
-  Use when the user clones the repo and wants to run it, or asks to "set up MiniCPM-test",
-  "部署桌宠", "跑起来 MiniCPM 桌宠", or hits errors during go.sh / npm start / uv sync.
+  [开发者向] 帮 contributor / 开发者从源码 dev 模式跑通 MiniCPM-test。
+  普通用户应直接下载 dmg 安装包，跟着 Onboarding 引导走，不应触发本 skill。
+  Use when a developer clones the repo and wants to run it from source, or asks to
+  "部署桌宠 (从源码)", "跑起来 MiniCPM dev 模式", or hits errors during go.sh / npm start / uv sync.
 ---
 
-# Deploying MiniCPM-test
+# Deploying MiniCPM-test (开发者从源码)
 
-This skill walks the agent through deploying the MiniCPM-test project on a colleague's machine. The project has 3 moving parts that need to come up in the right order.
+> **重要**：这个 Skill 只针对开发者。普通最终用户走的是 **下载 dmg → Onboarding** 流程，不应使用本 Skill。如果对方只是想"用一下这个应用"，请引导他们去 [Releases](https://github.com/EEEEEKKO/MiniCPM-test/releases) 下载 dmg。
+
+This skill walks the agent through deploying the MiniCPM-test project on a colleague's machine **from source**. The project has 3 moving parts that need to come up in the right order.
 
 ## Quick assessment first
 
@@ -117,7 +120,7 @@ Once Electron starts, you should see:
 
 Quick sanity check (in another terminal):
 ```bash
-curl -s http://127.0.0.1:8765/api/health | python3 -m json.tool
+curl -s http://127.0.0.1:18765/api/health | python3 -m json.tool
 ```
 
 Expected:
@@ -157,10 +160,10 @@ Probably the sidecar didn't come up. In `clawd-on-desk` terminal, look for `[sid
 - If sidecar can't find Python: set `MINICPM_PYTHON` to the right interpreter path
 - If sidecar crashed during model load: check Activity Monitor for memory pressure (model needs ~2GB RAM resident)
 
-### `port 8765 in use`
+### `port 18765 in use`
 Old sidecar didn't die cleanly. Kill it:
 ```bash
-lsof -ti:8765 | xargs kill -9
+lsof -ti:18765 | xargs kill -9
 ```
 
 ### `~/.cursor/hooks.json` doesn't get the cursor-hook
@@ -188,7 +191,7 @@ git pull
 
 The deploy is done when:
 - ✅ Pet visible on desktop
-- ✅ `curl -s http://127.0.0.1:8765/api/health` returns `ok:true`
+- ✅ `curl -s http://127.0.0.1:18765/api/health` returns `ok:true`
 - ✅ Click pet → bubble pops up → type a message → reply within a few seconds
 - ✅ In Cursor: ask Cursor anything → after Cursor finishes → pet says a one-line reaction (proves cursor-hook is wired)
 - ✅ `Settings → 🐾 MiniCPM` shows current model + adapter status

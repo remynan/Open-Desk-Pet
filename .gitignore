@@ -9,7 +9,11 @@ __pycache__/
 
 # Build / dist outputs
 dist/
-build/
+# Ignore PyInstaller intermediates / output but keep the source-of-truth
+# spec and build script committed.
+build/*
+!build/sidecar.spec
+!build/build-sidecar.sh
 
 # Model weights — too big to ship, friends/colleagues download separately
 models/

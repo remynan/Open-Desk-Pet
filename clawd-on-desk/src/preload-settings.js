@@ -134,6 +134,24 @@ contextBridge.exposeInMainWorld("minicpmSettings", {
   resetBubblePos: () => ipcRenderer.invoke("minicpm-settings:reset-bubble-pos"),
   enterBubbleEdit: () => ipcRenderer.invoke("minicpm-settings:enter-bubble-edit"),
   exitBubbleEdit: (save) => ipcRenderer.invoke("minicpm-settings:exit-bubble-edit", { save: !!save }),
+
+  // Accelerator (device) manual override
+  listDevices: () => ipcRenderer.invoke("minicpm-settings:list-devices"),
+  setDevice: (device) => ipcRenderer.invoke("minicpm-settings:set-device", { device }),
+  restartSidecar: () => ipcRenderer.invoke("minicpm-settings:restart-sidecar"),
+
+  // Local model directory override
+  getModelDir: () => ipcRenderer.invoke("minicpm-settings:get-model-dir"),
+  pickModelDir: () => ipcRenderer.invoke("minicpm-settings:pick-model-dir"),
+  resetModelDir: () => ipcRenderer.invoke("minicpm-settings:reset-model-dir"),
+
+  // Re-run onboarding (developer / recovery flow)
+  rerunOnboarding: () => ipcRenderer.invoke("minicpm-settings:rerun-onboarding"),
+  relaunchApp: () => ipcRenderer.invoke("minicpm-settings:relaunch-app"),
+
+  // Logs
+  getLogsInfo: () => ipcRenderer.invoke("minicpm-settings:get-logs-info"),
+  openLogsDir: () => ipcRenderer.invoke("minicpm-settings:open-logs-dir"),
 });
 
 contextBridge.exposeInMainWorld("doctor", {

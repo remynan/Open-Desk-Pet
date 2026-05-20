@@ -18,7 +18,7 @@ The original `minicpm-pet-bridge/` is left untouched; both can co-exist.
 ```bash
 cd minicpm-pet-bridge-uv
 uv sync           # creates .venv/, downloads deps (one-shot ~30s on first run)
-./run.sh          # starts the server on 127.0.0.1:8765
+./run.sh          # starts the server on 127.0.0.1:18765
 ```
 
 That's it. No conda env, no manual `pip install`.

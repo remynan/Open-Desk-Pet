@@ -13,7 +13,7 @@ Usage:
     python chat.py --thinking         # show the model's <think> reasoning
 
     # Talk to an already-running server.py:
-    python chat.py --server http://127.0.0.1:8765
+    python chat.py --server http://127.0.0.1:18765
 """
 
 from __future__ import annotations
@@ -345,7 +345,7 @@ def repl(engine, bridge: ClawdBridge, system: str, *, default_thinking: bool = F
 def main() -> None:
     p = argparse.ArgumentParser(description="MiniCPM terminal chat (with desktop pet animations)")
     p.add_argument("--server", default=os.environ.get("MINICPM_SERVER"),
-                   help="Connect to a running server.py at this URL (e.g. http://127.0.0.1:8765). "
+                   help="Connect to a running server.py at this URL (e.g. http://127.0.0.1:18765). "
                         "Default: load the model directly in this process.")
     p.add_argument("--model", default=str(DEFAULT_MODEL_DIR),
                    help=f"Model dir for direct mode (default: {DEFAULT_MODEL_DIR})")

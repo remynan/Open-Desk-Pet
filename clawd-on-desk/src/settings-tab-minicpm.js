@@ -90,6 +90,12 @@
     const adapterBox = el("div", {});
     parent.appendChild(adapterBox);
 
+    const deviceBox = el("div", {});
+    parent.appendChild(deviceBox);
+
+    const modelDirBox = el("div", {});
+    parent.appendChild(modelDirBox);
+
     const paramsBox = el("div", {});
     parent.appendChild(paramsBox);
 
@@ -98,6 +104,9 @@
 
     const narrationBox = el("div", {});
     parent.appendChild(narrationBox);
+
+    const advancedBox = el("div", {});
+    parent.appendChild(advancedBox);
 
     const hotkeysBox = el("div", {});
     parent.appendChild(hotkeysBox);
@@ -113,7 +122,7 @@
       return;
     }
 
-    await refreshAll(statusBox, updateBox, adapterBox, paramsBox, bubblePosBox, narrationBox);
+    await refreshAll(statusBox, updateBox, adapterBox, deviceBox, modelDirBox, paramsBox, bubblePosBox, narrationBox, advancedBox);
   }
 
   // Editing flag is module-scoped so navigating away cleans up safely.
@@ -336,7 +345,155 @@
     paramsBox.appendChild(sec);
   }
 
-  async function refreshAll(statusBox, updateBox, adapterBox, paramsBox, bubblePosBox, narrationBox) {
+  async function renderDeviceSection(box) {
+    box.innerHTML = "";
+    const sec = el("section", { className: "section" });
+    sec.appendChild(el("h3", { className: "section-title" }, "加速器"));
+    let info = null;
+    try { info = await window.minicpmSettings.listDevices(); } catch {}
+    if (!info || !info.available || info.available.length === 0) {
+      sec.appendChild(el("div", { className: "row-desc" },
+        "无法读取可用加速器；sidecar 可能未启动。"));
+      box.appendChild(sec);
+      return;
+    }
+    const select = el("select", { className: "select" });
+    const autoOpt = el("option", { value: "" }, "自动 (推荐 " + (info.recommended || "?") + ")");
+    select.appendChild(autoOpt);
+    for (const d of info.available) {
+      const label = d === "mps" ? "Apple Silicon GPU (MPS)"
+        : d === "cuda" ? "NVIDIA GPU (CUDA)"
+        : d === "cpu" ? "CPU"
+        : d;
+      const opt = el("option", { value: d }, label);
+      if (d === info.current) opt.selected = true;
+      select.appendChild(opt);
+    }
+    const ctl = el("div", { className: "row-control", style: { gap: "8px" } });
+    ctl.appendChild(select);
+    ctl.appendChild(btn("应用", async () => {
+      await window.minicpmSettings.setDevice(select.value || "");
+    }));
+    ctl.appendChild(btn("立即重启 sidecar", async (ev) => {
+      ev.target.disabled = true;
+      ev.target.textContent = "重启中…";
+      await window.minicpmSettings.restartSidecar();
+      ev.target.disabled = false;
+      ev.target.textContent = "立即重启 sidecar";
+    }));
+    const r = el("div", { className: "row" });
+    const t = el("div", { className: "row-text" });
+    t.appendChild(el("span", { className: "row-label" }, "推理后端"));
+    t.appendChild(el("span", { className: "row-desc" },
+      "当前: " + (info.current || "?") + "。切换后需要重启 sidecar 才生效。"));
+    r.appendChild(t);
+    r.appendChild(ctl);
+    sec.appendChild(r);
+    box.appendChild(sec);
+  }
+
+  async function renderModelDirSection(box) {
+    box.innerHTML = "";
+    const sec = el("section", { className: "section" });
+    sec.appendChild(el("h3", { className: "section-title" }, "模型路径"));
+    let info = null;
+    try { info = await window.minicpmSettings.getModelDir(); } catch {}
+    const r = el("div", { className: "row" });
+    const t = el("div", { className: "row-text" });
+    t.appendChild(el("span", { className: "row-label" }, "当前模型目录"));
+    const desc = el("span", { className: "row-desc" });
+    desc.textContent = info ? info.current : "(读取失败)";
+    if (info && !info.present) {
+      desc.textContent += " · 该路径下未找到 config.json";
+      desc.style.color = "var(--err, #ef4444)";
+    }
+    t.appendChild(desc);
+    r.appendChild(t);
+    const ctl = el("div", { className: "row-control", style: { gap: "8px" } });
+    ctl.appendChild(btn("更换…", async () => {
+      const ret = await window.minicpmSettings.pickModelDir();
+      if (ret && ret.ok) await renderModelDirSection(box);
+      else if (ret && !ret.canceled && ret.error) alert(ret.error);
+    }));
+    ctl.appendChild(btn("重置默认", async () => {
+      await window.minicpmSettings.resetModelDir();
+      await renderModelDirSection(box);
+    }));
+    r.appendChild(ctl);
+    sec.appendChild(r);
+    if (info && info.default !== info.current) {
+      sec.appendChild(el("div", { className: "row-desc", style: { padding: "0 12px" } },
+        "默认路径: " + info.default));
+    }
+    sec.appendChild(el("div", { className: "row-desc", style: { padding: "0 12px" } },
+      "更换或重置后，需重启 sidecar 或重启应用方可生效。"));
+    box.appendChild(sec);
+  }
+
+  async function renderAdvancedSection(box) {
+    box.innerHTML = "";
+    const sec = el("section", { className: "section" });
+    sec.appendChild(el("h3", { className: "section-title" }, "高级 / 开发"));
+
+    // ── Re-run onboarding ──
+    const r = el("div", { className: "row" });
+    const t = el("div", { className: "row-text" });
+    t.appendChild(el("span", { className: "row-label" }, "重新运行首次启动引导"));
+    t.appendChild(el("span", { className: "row-desc" },
+      "用于切设备、换模型路径或调试。点击后需要重启应用。"));
+    r.appendChild(t);
+    const ctl = el("div", { className: "row-control", style: { gap: "8px" } });
+    ctl.appendChild(btn("标记重新引导", async (ev) => {
+      const ret = await window.minicpmSettings.rerunOnboarding();
+      if (ret && ret.ok) {
+        ev.target.textContent = "已标记";
+        ev.target.disabled = true;
+      } else {
+        alert((ret && ret.error) || "操作失败");
+      }
+    }));
+    ctl.appendChild(btn("立即重启应用", async () => {
+      if (confirm("应用将立即重启。是否继续？")) {
+        await window.minicpmSettings.relaunchApp();
+      }
+    }));
+    r.appendChild(ctl);
+    sec.appendChild(r);
+
+    // ── Logs ──
+    const lr = el("div", { className: "row" });
+    const lt = el("div", { className: "row-text" });
+    lt.appendChild(el("span", { className: "row-label" }, "日志"));
+    const ldesc = el("span", { className: "row-desc" });
+    ldesc.textContent = "加载中…";
+    lt.appendChild(ldesc);
+    lr.appendChild(lt);
+    const lctl = el("div", { className: "row-control", style: { gap: "8px" } });
+    lctl.appendChild(btn("打开日志目录", async () => {
+      const ret = await window.minicpmSettings.openLogsDir();
+      if (ret && !ret.ok) alert(ret.error || "无法打开日志目录");
+    }));
+    lr.appendChild(lctl);
+    sec.appendChild(lr);
+
+    // Populate the description asynchronously.
+    (async () => {
+      try {
+        const info = await window.minicpmSettings.getLogsInfo();
+        if (!info) { ldesc.textContent = "无法读取日志目录"; return; }
+        const total = (info.entries || []).reduce((s, e) => s + (e.size || 0), 0);
+        const totalKb = total > 0 ? `${(total / 1024).toFixed(1)} KB` : "0";
+        const count = (info.entries || []).length;
+        ldesc.textContent = `位置: ${info.dir}   ·   ${count} 个文件   ·   总计 ${totalKb}`;
+      } catch {
+        ldesc.textContent = "无法读取日志目录";
+      }
+    })();
+
+    box.appendChild(sec);
+  }
+
+  async function refreshAll(statusBox, updateBox, adapterBox, deviceBox, modelDirBox, paramsBox, bubblePosBox, narrationBox, advancedBox) {
     // ── status ──
     let st = null;
     try { st = await window.minicpmSettings.getStatus(); } catch {}
@@ -374,7 +531,7 @@
     updRow.appendChild(updText);
     const updCtl = el("div", { className: "row-control" });
     updCtl.appendChild(btn("重新检查", async () => {
-      await refreshAll(statusBox, updateBox, adapterBox, paramsBox, bubblePosBox, narrationBox);
+      await refreshAll(statusBox, updateBox, adapterBox, deviceBox, modelDirBox, paramsBox, bubblePosBox, narrationBox, advancedBox);
     }));
     if (upd && upd.available) {
       updCtl.appendChild(btn("立即更新", async (ev) => {
@@ -383,7 +540,7 @@
         await window.minicpmSettings.applyUpdate();
         ev.target.disabled = false;
         ev.target.textContent = "立即更新";
-        await refreshAll(statusBox, updateBox, adapterBox, paramsBox, bubblePosBox, narrationBox);
+        await refreshAll(statusBox, updateBox, adapterBox, deviceBox, modelDirBox, paramsBox, bubblePosBox, narrationBox, advancedBox);
       }, { primary: true }));
     }
     const updSec = el("section", { className: "section" });
@@ -417,7 +574,7 @@
         await window.minicpmSettings.loadAdapter(target);
         applyBtn.disabled = false;
         applyBtn.textContent = "应用";
-        await refreshAll(statusBox, updateBox, adapterBox, paramsBox, bubblePosBox, narrationBox);
+        await refreshAll(statusBox, updateBox, adapterBox, deviceBox, modelDirBox, paramsBox, bubblePosBox, narrationBox, advancedBox);
       }, { primary: true });
       const ctl = el("div", { className: "row-control", style: { gap: "8px" } });
       ctl.appendChild(select);
@@ -431,6 +588,12 @@
       adapterSec.appendChild(r);
     }
     adapterBox.appendChild(adapterSec);
+
+    // ── accelerator ──
+    await renderDeviceSection(deviceBox);
+
+    // ── local model directory override ──
+    await renderModelDirSection(modelDirBox);
 
     // ── chat generation params ──
     await renderParamsSection(paramsBox);
@@ -458,6 +621,9 @@
     nr.appendChild(nc);
     narrSec.appendChild(nr);
     narrationBox.appendChild(narrSec);
+
+    // ── advanced / dev ──
+    await renderAdvancedSection(advancedBox);
   }
 
   function init(coreArg) {

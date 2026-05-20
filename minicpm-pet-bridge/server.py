@@ -6,9 +6,9 @@ pet states (thinking → working → attention) to the desktop pet's HTTP server
 it animates along with the conversation.
 
 Usage:
-    python server.py --model /path/to/minicpm5-0.9b --host 127.0.0.1 --port 8765
+    python server.py --model /path/to/minicpm5-0.9b --host 127.0.0.1 --port 18765
 
-Open http://127.0.0.1:8765 in a browser.
+Open http://127.0.0.1:18765 in a browser.
 """
 
 from __future__ import annotations
@@ -52,6 +52,124 @@ def _safe_print(*args, **kwargs):
             sys.stderr = open(os.devnull, "w")
         except Exception:
             pass
+
+
+# ── Python-side logging ──────────────────────────────────────────────────────
+#
+# The Electron host already mirrors our stdout/stderr to
+# `<userData>/logs/sidecar.log` (see clawd-on-desk/src/minicpm-chat.js),
+# but that file is "what the parent saw", which:
+#   - is gone when the sidecar runs standalone (./go.sh, manual uv run)
+#   - only contains broken-pipe-safe `_safe_print` output, not exceptions
+#     raised inside transformers / peft / torch
+#
+# This module adds a *second* file logger inside the sidecar itself:
+#
+#   <log dir>/sidecar-internal.log
+#
+# where `<log dir>` is:
+#   1. $MINICPM_LOG_DIR  (set by Electron when packaged)
+#   2. $XDG_STATE_HOME/minicpm-pet-bridge/  (Linux convention)
+#   3. ~/Library/Logs/MiniCPM Desk Pet/sidecar/  (macOS convention)
+#   4. <bridge dir>/.logs/  (dev fallback)
+#
+# Anything routed through `log = get_logger()` lands in BOTH the file and
+# stderr. Exceptions caught around model load / generation / adapter swap
+# go through `log.exception(...)` so the full traceback persists on disk.
+
+import logging
+import logging.handlers
+import platform
+
+
+def _resolve_log_dir() -> Path:
+    env_dir = os.environ.get("MINICPM_LOG_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    if platform.system() == "Darwin":
+        return Path.home() / "Library" / "Logs" / "MiniCPM Desk Pet" / "sidecar"
+    xdg_state = os.environ.get("XDG_STATE_HOME")
+    if xdg_state:
+        return Path(xdg_state).expanduser() / "minicpm-pet-bridge"
+    if platform.system() == "Linux":
+        return Path.home() / ".local" / "state" / "minicpm-pet-bridge"
+    if platform.system() == "Windows":
+        appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "MiniCPM Desk Pet" / "logs"
+    return Path(__file__).resolve().parent / ".logs"
+
+
+class _StderrSafeStreamHandler(logging.StreamHandler):
+    """StreamHandler that survives a closed parent pipe."""
+
+    def emit(self, record):
+        try:
+            super().emit(record)
+        except (BrokenPipeError, OSError):
+            # Same fallback strategy as `_safe_print`: stop trying.
+            try:
+                self.stream = open(os.devnull, "w")
+            except Exception:
+                pass
+
+
+_LOGGER_NAME = "minicpm-sidecar"
+_logger_configured = False
+
+
+def setup_logging(level: int = logging.INFO) -> logging.Logger:
+    """Configure (idempotently) the file + stderr logger and return it.
+
+    Safe to call multiple times — only attaches handlers on first call.
+    """
+    global _logger_configured
+    log = logging.getLogger(_LOGGER_NAME)
+    if _logger_configured:
+        return log
+
+    log.setLevel(level)
+    log.propagate = False
+
+    fmt = logging.Formatter(
+        fmt="%(asctime)s %(levelname)-5s %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Stderr handler — mirrors what the Electron host already captures
+    # into <userData>/logs/sidecar.log, so dev/packaged behaviour matches.
+    stream = _StderrSafeStreamHandler(stream=sys.stderr)
+    stream.setFormatter(fmt)
+    log.addHandler(stream)
+
+    # File handler — the *sidecar's own* persistent log. Rotated at 2 MB,
+    # 3 backups kept so we don't grow unbounded if Electron leaves us
+    # running for days.
+    try:
+        log_dir = _resolve_log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "sidecar-internal.log"
+        file_h = logging.handlers.RotatingFileHandler(
+            log_path,
+            maxBytes=2 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_h.setFormatter(fmt)
+        log.addHandler(file_h)
+        # Announce so users / agents know where to look.
+        _safe_print(f"[sidecar] internal log -> {log_path}", file=sys.stderr, flush=True)
+    except Exception as exc:
+        _safe_print(f"[sidecar] file logger setup failed: {exc}", file=sys.stderr, flush=True)
+
+    _logger_configured = True
+    return log
+
+
+def get_logger() -> logging.Logger:
+    """Module-level convenience accessor — calls setup_logging() lazily."""
+    return setup_logging()
+
 
 DEFAULT_MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "minicpm5-0.9b"
 DEFAULT_MODELS_ROOT = Path(__file__).resolve().parent.parent / "models"
@@ -159,43 +277,75 @@ class ChatEngine:
         If `force=True`, weights are reloaded even when `model_dir` matches
         the currently loaded directory (used after an in-place update).
         """
+        log = get_logger()
         with self._swap_lock:
             if not force and self.model is not None and Path(model_dir) == self.model_dir:
+                log.debug("load() no-op: %s already loaded", model_dir)
                 return
-            _safe_print(f"[engine] loading {model_dir} on {self.device} ({self.torch_dtype})...", flush=True)
-            t0 = time.time()
-            tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                str(model_dir),
-                torch_dtype=self.torch_dtype,
-                trust_remote_code=True,
-                low_cpu_mem_usage=True,
+            log.info(
+                "load start | dir=%s device=%s dtype=%s adapter=%s",
+                model_dir,
+                self.device,
+                str(self.torch_dtype).replace("torch.", ""),
+                self.adapter_dir.name if self.adapter_dir else None,
             )
-            if self.adapter_dir is not None:
-                if (self.adapter_dir / "adapter_config.json").exists():
-                    _safe_print(f"[engine] applying LoRA adapter: {self.adapter_dir.name}", flush=True)
-                    from peft import PeftModel
-                    model = PeftModel.from_pretrained(model, str(self.adapter_dir))
-                else:
-                    _safe_print(f"[engine] adapter dir has no adapter_config.json, skipping: {self.adapter_dir}", flush=True)
-            model = model.to(self.device)
-            model.eval()
-            old_model = self.model
-            self.model = model
-            self.tokenizer = tokenizer
-            self.eos_token_ids = _coerce_eos_ids(model.generation_config.eos_token_id, tokenizer)
-            self.model_dir = Path(model_dir)
-            # Classifier baselines depend on the model + tokenizer pair.
-            self._classify_baseline_cache = {}
-            del old_model
+            t0 = time.time()
             try:
+                tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
+                # On Apple Silicon MPS, the SDPA path crashes inside MPSGraph
+                # when the model uses Grouped-Query Attention (Q heads ≫ KV
+                # heads) — the MPS kernel can't infer the broadcast shape of
+                # `(B, n_q, T, d) @ (B, n_kv, d, T)` and raises:
+                #     LLVM ERROR: Failed to infer result type(s) for mps.matmul
+                # Forcing eager attention makes transformers do the
+                # repeat_interleave on KV before the matmul, which stays
+                # within ops MPS handles.
+                attn_kwargs = {}
                 if self.device == "mps":
-                    torch.mps.empty_cache()
-                elif self.device == "cuda":
-                    torch.cuda.empty_cache()
+                    attn_kwargs["attn_implementation"] = "eager"
+                    log.info("load: forcing attn_implementation=eager for MPS")
+                model = AutoModelForCausalLM.from_pretrained(
+                    str(model_dir),
+                    torch_dtype=self.torch_dtype,
+                    trust_remote_code=True,
+                    low_cpu_mem_usage=True,
+                    **attn_kwargs,
+                )
+                if self.adapter_dir is not None:
+                    if (self.adapter_dir / "adapter_config.json").exists():
+                        log.info("load: applying LoRA adapter %s", self.adapter_dir.name)
+                        from peft import PeftModel
+                        model = PeftModel.from_pretrained(model, str(self.adapter_dir))
+                    else:
+                        log.warning(
+                            "load: adapter dir has no adapter_config.json, skipping: %s",
+                            self.adapter_dir,
+                        )
+                model = model.to(self.device)
+                model.eval()
+                old_model = self.model
+                self.model = model
+                self.tokenizer = tokenizer
+                self.eos_token_ids = _coerce_eos_ids(model.generation_config.eos_token_id, tokenizer)
+                self.model_dir = Path(model_dir)
+                # Classifier baselines depend on the model + tokenizer pair.
+                self._classify_baseline_cache = {}
+                del old_model
+                try:
+                    if self.device == "mps":
+                        torch.mps.empty_cache()
+                    elif self.device == "cuda":
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                log.info("load ready | took=%.1fs eos_token_ids=%s", time.time() - t0, self.eos_token_ids)
             except Exception:
-                pass
-            _safe_print(f"[engine] ready in {time.time() - t0:.1f}s", flush=True)
+                # Persist the *full* traceback to disk — without this the
+                # only place a `RuntimeError: Failed to find class
+                # transformers.models.minicpm5.*` shows up is the parent's
+                # stderr ring buffer, which gets truncated to 1500 chars.
+                log.exception("load FAILED for %s", model_dir)
+                raise
             self._warmup()
 
     def _warmup(self) -> None:
@@ -210,8 +360,9 @@ class ChatEngine:
         and run them once with the LoRA adapter active and once with it
         disabled (chat uses LoRA; classifier always disables it).
         """
+        log = get_logger()
         try:
-            _safe_print("[engine] warming up kernels…", flush=True)
+            log.info("warmup starting kernels …")
             t0 = time.time()
             text = self.tokenizer.apply_chat_template(
                 [{"role": "user", "content": "你好"}],
@@ -251,9 +402,9 @@ class ChatEngine:
             _run_one("chat-sampling", sample=True, with_adapter=True)
             # Classifier path (greedy, base model only).
             _run_one("classify-greedy", sample=False, with_adapter=False)
-            _safe_print(f"[engine] warmup done in {time.time() - t0:.1f}s", flush=True)
+            log.info("warmup done in %.1fs", time.time() - t0)
         except Exception as exc:
-            _safe_print(f"[engine] warmup skipped: {exc}", flush=True)
+            log.exception("warmup skipped: %s", exc)
 
     @staticmethod
     def _pick_device() -> str:
@@ -275,7 +426,18 @@ class ChatEngine:
         if torch.backends.mps.is_available():
             return torch.bfloat16
         if torch.cuda.is_available():
-            return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            # bf16 needs SM 8.0+ (Ampere). On Turing / Pascal cards
+            # torch.cuda.is_bf16_supported() returns True via emulation but
+            # generation is unusably slow, so we force fp16 there.
+            try:
+                major, _ = torch.cuda.get_device_capability(0)
+                if major >= 8 and torch.cuda.is_bf16_supported():
+                    return torch.bfloat16
+                return torch.float16
+            except Exception:
+                return torch.float16
+        # Pure CPU: stay on fp32. PyTorch CPU bf16 kernels are incomplete
+        # and noticeably slower than fp32 on most laptop CPUs.
         return torch.float32
 
     def _build_inputs(
@@ -397,7 +559,7 @@ class ChatEngine:
                     else:
                         self.model.generate(**gen_kwargs)
             except Exception as exc:
-                _safe_print(f"[engine] generate error: {exc}", file=sys.stderr, flush=True)
+                get_logger().exception("generate error: %s", exc)
                 streamer.text_queue.put(streamer.stop_signal)  # unblock consumer
             finally:
                 self._lock.release()
@@ -530,6 +692,80 @@ def build_app(
             "model_name": engine.model_dir.name,
             "adapter": str(engine.adapter_dir) if engine.adapter_dir else None,
             "persona": current_persona(),
+        }
+
+    @app.get("/api/devices")
+    def list_devices():
+        """List inference backends the host can run on.
+
+        Returns a stable schema the Electron Onboarding UI consumes:
+            available   : ordered candidates the host actually supports
+            recommended : highest-quality option (mps > cuda > cpu)
+            current     : whatever the running engine has loaded
+            reasons     : human-readable hint per option (locale: zh)
+        """
+        available: List[str] = []
+        reasons: dict = {}
+        try:
+            if torch.backends.mps.is_available():
+                available.append("mps")
+                reasons["mps"] = "Apple Silicon GPU (Metal)"
+        except Exception:
+            pass
+        try:
+            if torch.cuda.is_available():
+                available.append("cuda")
+                name = torch.cuda.get_device_name(0)
+                reasons["cuda"] = f"CUDA · {name}"
+        except Exception:
+            pass
+        available.append("cpu")
+        reasons["cpu"] = "纯 CPU 推理，速度较慢但任何机器都能跑"
+        recommended = available[0] if available else "cpu"
+        return {
+            "available": available,
+            "recommended": recommended,
+            "current": engine.device,
+            "reasons": reasons,
+        }
+
+    @app.post("/api/set-device")
+    async def set_device(payload: dict):
+        """Persist the user's manual device override.
+
+        Writes MINICPM_DEVICE for the current process so subsequent
+        engine reloads honour it. The Electron side is expected to
+        restart the sidecar after this returns, since `engine.device`
+        is decided at construction time.
+        """
+        device = str(payload.get("device") or "").strip().lower()
+        if device not in ("mps", "cuda", "cpu", "auto", ""):
+            return JSONResponse({"error": f"unknown device: {device!r}"}, status_code=400)
+        if device:
+            os.environ["MINICPM_DEVICE"] = device
+        else:
+            os.environ.pop("MINICPM_DEVICE", None)
+        return {"ok": True, "device": device or "auto", "note": "restart sidecar to take effect"}
+
+    @app.get("/api/onboarding")
+    def onboarding():
+        """Single-shot status snapshot for the first-launch wizard.
+
+        The Electron Onboarding window polls this between steps. We
+        report whether the model is present and the engine is warm.
+        Heavy stages (download / warmup) drive their own progress via
+        /api/update-apply SSE and /api/warmup latency respectively;
+        this endpoint is just the truth source for stage transitions.
+        """
+        model_present = (engine.model_dir / "config.json").exists()
+        return {
+            "model_present": model_present,
+            "model_dir": str(engine.model_dir),
+            "device": engine.device,
+            "dtype": str(engine.torch_dtype).replace("torch.", ""),
+            "adapter": str(engine.adapter_dir) if engine.adapter_dir else None,
+            "persona": current_persona(),
+            "stage_hint": "ready" if model_present else "model-download",
         }
 
     @app.get("/api/models")
@@ -885,15 +1121,30 @@ def _sse(payload: dict) -> bytes:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MiniCPM local chat + clawd-on-desk bridge")
-    parser.add_argument("--model", default=os.environ.get("MINICPM_MODEL", str(DEFAULT_MODEL_DIR)),
-                        help=f"Initial model directory (default: {DEFAULT_MODEL_DIR})")
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("MINICPM_MODEL_DIR") or os.environ.get("MINICPM_MODEL") or str(DEFAULT_MODEL_DIR),
+        help=(
+            "Initial model directory. Reads MINICPM_MODEL_DIR (preferred, used by the "
+            "packaged Electron app) then MINICPM_MODEL, falling back to "
+            f"{DEFAULT_MODEL_DIR}."
+        ),
+    )
     parser.add_argument("--models-root", action="append", default=None,
                         help="Directory to scan for model subfolders. Can be passed multiple times. "
                              f"Default: {DEFAULT_MODELS_ROOT}")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    # Default port avoids 8765 (Apache CouchDB / Bitcoin Cash test / etc.)
+    # to dodge common collisions on developer machines. Override with
+    # MINICPM_PORT env (the Electron app sets this automatically) or
+    # --port on the command line.
+    parser.add_argument("--port", type=int, default=int(os.environ.get("MINICPM_PORT") or 18765))
     parser.add_argument("--dtype", choices=["auto", "bfloat16", "float16", "float32"], default="auto")
-    parser.add_argument("--device", default=None, help="Force device (mps/cuda/cpu); default: autodetect")
+    parser.add_argument(
+        "--device",
+        default=(os.environ.get("MINICPM_DEVICE") or None),
+        help="Force device (mps/cuda/cpu). Reads MINICPM_DEVICE env (set by Settings → 加速器 in the Electron app) when not provided.",
+    )
     parser.add_argument("--no-pet", action="store_true", help="Disable clawd-on-desk state push")
     parser.add_argument("--debug-pet", action="store_true")
     parser.add_argument("--update-source", default=os.environ.get("MINICPM_UPDATE_SOURCE", DEFAULT_UPDATE_SOURCE),
@@ -905,8 +1156,24 @@ def main() -> None:
                         help="Which built-in system prompt to use")
     args = parser.parse_args()
 
+    # Initialise the disk logger as early as possible so the rest of main
+    # (model discovery, adapter resolution, engine boot) all hit the file.
+    log = setup_logging()
+    log.info(
+        "sidecar starting | argv=%s python=%s platform=%s",
+        sys.argv[1:],
+        sys.version.split()[0],
+        platform.platform(),
+    )
+
+    # "auto" is the wire-level value for "let the engine pick"; the
+    # engine's _pick_device() expects None for the same intent.
+    if isinstance(args.device, str) and args.device.lower() in ("", "auto"):
+        args.device = None
+
     model_dir = Path(args.model).expanduser().resolve()
     if not (model_dir / "config.json").exists():
+        log.error("model not found at %s — aborting", model_dir)
         sys.exit(f"[fatal] model not found: {model_dir}")
 
     roots_env = os.environ.get("MINICPM_MODELS_ROOT", "")
@@ -916,7 +1183,7 @@ def main() -> None:
 
     adapter_dir = Path(args.adapter).expanduser().resolve() if args.adapter else None
     if adapter_dir and not adapter_dir.exists():
-        _safe_print(f"[warn] adapter dir not found, ignoring: {adapter_dir}", flush=True)
+        log.warning("adapter dir not found, ignoring: %s", adapter_dir)
         adapter_dir = None
 
     # Pick the right persona prompt for whichever adapter (if any) is loaded.
@@ -926,14 +1193,20 @@ def main() -> None:
         DEFAULT_SYSTEM_PROMPT = NEKO_SYSTEM_PROMPT
     else:
         set_persona_for_adapter(adapter_dir)
-    _safe_print(f"[engine] persona = {current_persona()}", flush=True)
+    log.info("persona = %s", current_persona())
 
-    engine = ChatEngine(model_dir, dtype=args.dtype, device=args.device, adapter_dir=adapter_dir)
+    try:
+        engine = ChatEngine(model_dir, dtype=args.dtype, device=args.device, adapter_dir=adapter_dir)
+    except Exception:
+        # Already logged with traceback inside ChatEngine.load(); we
+        # propagate here only to short-circuit the rest of main(). The
+        # `log.exception` in load() has already persisted the trace.
+        raise
     bridge = ClawdBridge(enabled=not args.no_pet, debug=args.debug_pet)
 
     import uvicorn  # imported here so --help works without uvicorn installed
     app = build_app(engine, bridge, roots, args.update_source)
-    _safe_print(f"[server] http://{args.host}:{args.port}", flush=True)
+    log.info("server listening on http://%s:%s", args.host, args.port)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info", access_log=False)
 
 

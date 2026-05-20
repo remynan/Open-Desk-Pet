@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# go.sh — 一键安装 + 启动 MiniCPM 桌宠 (uv 版本)
+# go.sh — [开发者快捷脚本] 一键起开发模式的 MiniCPM 桌宠
 #
-# 第一次跑：检查依赖、装 uv (如缺)、uv sync、npm install、启动桌宠
-# 之后再跑：所有 sync/install 都是 idempotent 的,瞬间跳过,直接启动
+# ┌────────────────────────────────────────────────────────────────┐
+# │  这是给「开发者」用的，不是给最终用户的。                       │
+# │  普通用户请直接下载 dmg 安装包，安装后跟着 Onboarding 引导走。 │
+# │                                                                │
+# │  ./go.sh 做的事：检查 Node/uv 是否就绪 → uv sync → npm install │
+# │  → npm start 拉起 Electron（dev mode，会从源码起 sidecar）。   │
+# │                                                                │
+# │  打包好的 .app / .dmg 已经内置 PyInstaller sidecar binary，    │
+# │  不依赖本脚本。                                                │
+# └────────────────────────────────────────────────────────────────┘
 #
 # Usage:
 #   ./go.sh           # 安装 + 启动 (前台)
 #   ./go.sh setup     # 只装依赖,不启动
 #   ./go.sh start     # 跳过依赖检查直接启动
 #   ./go.sh doctor    # 检查环境但什么都不做
+#   ./go.sh build     # 走 PyInstaller + electron-builder 出 dmg
 
 set -e
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -213,9 +222,21 @@ case "$cmd" in
     install_npm_deps
     start_pet
     ;;
+  build)
+    # 一站式：PyInstaller 打 sidecar binary → electron-builder 出 dmg。
+    # 仅 mac arm64 / MVP 路径。输出位于 clawd-on-desk/dist/*.dmg。
+    check_environment
+    install_python_deps
+    install_npm_deps
+    cyan "==> 打包 sidecar binary (PyInstaller)..."
+    "$HERE/build/build-sidecar.sh"
+    cyan "==> 打包 Electron 应用 (electron-builder)..."
+    cd "$APP_DIR" && npx electron-builder --mac --arm64 -c.mac.target=dmg
+    green "==> 完成。dmg 位于 $APP_DIR/dist/"
+    ;;
   *)
     red "未知命令: $cmd"
-    red "用法: ./go.sh [doctor|setup|start|run]"
+    red "用法: ./go.sh [doctor|setup|start|run|build]"
     exit 1
     ;;
 esac

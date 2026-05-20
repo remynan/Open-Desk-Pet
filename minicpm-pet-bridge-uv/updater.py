@@ -26,10 +26,27 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
+# Production default: the public HuggingFace repo. Dev can override to
+# point at a local mock directory via MINICPM_UPDATE_SOURCE=mock://...
 DEFAULT_SOURCE = os.environ.get(
     "MINICPM_UPDATE_SOURCE",
-    f"mock://{Path.home() / 'Downloads' / 'Minicpm' / '.mock-hf-remote' / 'minicpm-pet-org' / 'minicpm5-0.9b'}",
+    "hf://openbmb/MiniCPM5-0.9B",
 )
+
+
+def _atomic_move(src: Path, dst: Path) -> None:
+    """Rename src to dst across volumes safely.
+
+    os.replace() is atomic on the same filesystem but fails with
+    EXDEV / [WinError 17] when src and dst live on different drives
+    (common on Windows where the user moves their models to D:\\ but
+    the staging dir is on C:\\). shutil.move() falls back to a
+    cross-volume copy + delete in that case.
+    """
+    try:
+        os.replace(src, dst)
+    except OSError:
+        shutil.move(str(src), str(dst))
 
 
 @dataclass
@@ -283,8 +300,8 @@ class ModelUpdater:
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
                     if self.local_model_dir.exists():
-                        os.replace(self.local_model_dir, backup)
-                    os.replace(staging, self.local_model_dir)
+                        _atomic_move(self.local_model_dir, backup)
+                    _atomic_move(staging, self.local_model_dir)
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
                     push({"phase": "complete"})

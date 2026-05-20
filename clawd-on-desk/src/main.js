@@ -1114,6 +1114,38 @@ const _minicpmChat = require("./minicpm-chat")({
 });
 const openMinicpmChat = () => _minicpmChat.open();
 
+// First-launch onboarding wizard. Lives as a separate BrowserWindow that
+// owns the screen until the user finishes the 5 stages; only then does
+// the pet window get created and the sidecar get warmed up.
+const _minicpmOnboarding = require("./minicpm-onboarding")({
+  getSidecarUrl: () => _minicpmChat.getSidecarUrl(),
+  getChat: () => _minicpmChat,
+  ensureSidecarRunning: async () => {
+    // Triggered by the wizard before /api/update-apply / /api/warmup.
+    // Use the error-propagating variant: the user-facing warmup() wraps
+    // failures in try/catch (so background launches don't bring down the
+    // app), but during Onboarding we need to surface "spawn failed" so
+    // the wizard can show a real error instead of hitting ECONNREFUSED
+    // on the next HTTP call.
+    try {
+      const r = await _minicpmChat.ensureSidecarReady();
+      return { ok: true, status: r && r.status };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  },
+  onComplete: () => {
+    // Wizard sentinel is written, pet window can finally appear.
+    // We mirror the original "create pet → background warmup" pattern.
+    try { createWindow(); } catch (err) { console.error("createWindow after onboarding:", err); }
+    setTimeout(() => {
+      if (_minicpmChat && typeof _minicpmChat.warmup === "function") {
+        _minicpmChat.warmup();
+      }
+    }, 500);
+  },
+});
+
 // ── Derived states: overload + failure-streak ──────────────────────────────
 // Watches the same /state events flowing into clawd and synthesises two new
 // states the underlying agents don't emit themselves:
@@ -1934,7 +1966,15 @@ if (!gotTheLock) {
     updateDebugLog = path.join(app.getPath("userData"), "update-debug.log");
     sessionDebugLog = path.join(app.getPath("userData"), "session-debug.log");
     focusDebugLog = path.join(app.getPath("userData"), "focus-debug.log");
-    createWindow();
+
+    // First launch (or stale sentinel) → show the onboarding wizard
+    // *before* the pet window. createWindow() + warmup get re-triggered
+    // from the wizard's onComplete callback.
+    if (_minicpmOnboarding && _minicpmOnboarding.shouldShow()) {
+      _minicpmOnboarding.open();
+    } else {
+      createWindow();
+    }
     if (shouldOpenSettingsWindowFromArgv(process.argv)) {
       settingsWindowRuntime.open();
     }
@@ -1982,11 +2022,18 @@ if (!gotTheLock) {
     // Spawning the Python process and compiling MPS kernels takes 5–10s.
     // Doing it here means by the time the user actually talks to the pet
     // (potentially minutes later), generation starts instantly.
-    setTimeout(() => {
-      if (_minicpmChat && typeof _minicpmChat.warmup === "function") {
-        _minicpmChat.warmup();
-      }
-    }, 500);
+    //
+    // SKIPPED on first launch: the onboarding wizard owns warmup and the
+    // sidecar isn't usable until the user finishes downloading the model
+    // (`_minicpmOnboarding.shouldShow()` returns true). The wizard's
+    // onComplete callback re-runs createWindow() + warmup.
+    if (!(_minicpmOnboarding && _minicpmOnboarding.shouldShow())) {
+      setTimeout(() => {
+        if (_minicpmChat && typeof _minicpmChat.warmup === "function") {
+          _minicpmChat.warmup();
+        }
+      }, 500);
+    }
 
     // Construct log monitors. We always instantiate them so toggling the
     // agent on/off later can call start()/stop() without paying the require

@@ -1,0 +1,361 @@
+"use strict";
+//
+// MiniCPM Onboarding — first-launch wizard.
+//
+// Lives as a single BrowserWindow (NOT a panel) shown before the pet
+// when <userData>/minicpm-onboarding.json is missing or stale. Drives
+// the user through the 5 stages mirrored after Voca:
+//   1 env-check      — disk space + network reachability
+//   2 device-pick    — pick MPS / CUDA / CPU
+//   3 model-download — pull MiniCPM5-0.9B from HF (or point at a local
+//                      directory the user already has)
+//   4 warmup         — start sidecar + run /api/warmup
+//   5 ready          — handoff to the pet window
+//
+// On `onboarding:complete` we write a sentinel file and invoke the
+// `onComplete` callback supplied by main.js, which then constructs the
+// pet window and warms the sidecar in the background.
+//
+
+const { BrowserWindow, ipcMain, dialog, app } = require("electron");
+const fs = require("fs");
+const http = require("http");
+const path = require("path");
+const os = require("os");
+
+const isMac = process.platform === "darwin";
+const SENTINEL_FILE = "minicpm-onboarding.json";
+const CURRENT_VERSION = 1;
+
+function userDataPath(name) {
+  try { return path.join(app.getPath("userData"), name); }
+  catch { return path.join(os.tmpdir(), name); }
+}
+
+function httpJson(method, urlStr, body, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const opts = {
+      hostname: u.hostname,
+      port: u.port || 80,
+      path: u.pathname + (u.search || ""),
+      method,
+      headers: { "content-type": "application/json" },
+      timeout: timeoutMs,
+    };
+    const req = http.request(opts, (res) => {
+      let data = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          resolve({ status: res.statusCode || 0, json: data ? JSON.parse(data) : null });
+        } catch {
+          resolve({ status: res.statusCode || 0, json: null, raw: data });
+        }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+// Stream SSE from a POST endpoint and call `onEvent(parsedJSON)` for each
+// "data: {...}" block. Resolves when the stream ends.
+function postSSE(urlStr, onEvent) {
+  return new Promise((resolve) => {
+    const u = new URL(urlStr);
+    const req = http.request({
+      hostname: u.hostname,
+      port: u.port || 80,
+      path: u.pathname,
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": 0 },
+      timeout: 0,
+    }, (res) => {
+      let buf = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        buf += chunk;
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const block = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          if (!block.startsWith("data:")) continue;
+          try {
+            const ev = JSON.parse(block.slice(5).trim());
+            try { onEvent && onEvent(ev); } catch {}
+          } catch {}
+        }
+      });
+      res.on("end", () => resolve({ ok: true }));
+    });
+    req.on("error", (err) => resolve({ ok: false, error: err.message }));
+    req.end();
+  });
+}
+
+module.exports = function initOnboarding(ctx) {
+  // ctx must provide:
+  //   getSidecarUrl()    — http://127.0.0.1:18765
+  //   getChat()          — the _minicpmChat instance from main.js (lazy
+  //                         access so we can read effective model dir,
+  //                         restart sidecar, etc.)
+  //   onComplete()       — called once user finishes the wizard; main.js
+  //                         creates the pet window inside this callback
+  const log = (msg) => { try { console.log(msg); } catch {} };
+  let win = null;
+  let modelDownloadAbort = null;
+
+  // ── sentinel file (records "did the user already finish onboarding") ───
+  function readSentinel() {
+    try {
+      return JSON.parse(fs.readFileSync(userDataPath(SENTINEL_FILE), "utf-8"));
+    } catch { return null; }
+  }
+  function writeSentinel(extra = {}) {
+    const payload = {
+      complete: true,
+      version: CURRENT_VERSION,
+      completedAt: new Date().toISOString(),
+      ...extra,
+    };
+    try {
+      fs.writeFileSync(userDataPath(SENTINEL_FILE), JSON.stringify(payload, null, 2), "utf-8");
+    } catch (err) {
+      log(`[onboarding] sentinel save failed: ${err && err.message}`);
+    }
+    return payload;
+  }
+  function shouldShow() {
+    // Force-rerun via env (developer override).
+    if (process.env.MINICPM_FORCE_ONBOARDING === "1") return true;
+    const s = readSentinel();
+    if (!s || s.complete !== true) return true;
+    // Future-proof: a schema bump invalidates older sentinels.
+    if (typeof s.version === "number" && s.version < CURRENT_VERSION) return true;
+    // If the model directory the user picked has vanished (e.g. they
+    // deleted ~/Library/.../models/ manually) we re-show the wizard so
+    // they can pick a new path or re-download.
+    try {
+      const chat = ctx && ctx.getChat && ctx.getChat();
+      if (chat && typeof chat.isModelPresent === "function" && !chat.isModelPresent()) {
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+  function reset() {
+    try { fs.unlinkSync(userDataPath(SENTINEL_FILE)); } catch {}
+  }
+
+  // ── BrowserWindow lifecycle ────────────────────────────────────────────
+  function createWindow() {
+    win = new BrowserWindow({
+      width: 820,
+      height: 560,
+      resizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      title: "MiniCPM 桌宠 — 首次启动",
+      show: false,
+      autoHideMenuBar: true,
+      // Plain top-level window — not a panel — so it behaves like a
+      // normal install wizard with proper focus/zorder semantics on mac.
+      webPreferences: {
+        preload: path.join(__dirname, "preload-minicpm-onboarding.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    win.setMenuBarVisibility(false);
+    win.loadFile(path.join(__dirname, "minicpm-onboarding.html"));
+    win.once("ready-to-show", () => {
+      win.show();
+      win.focus();
+    });
+    win.on("closed", () => { win = null; });
+    return win;
+  }
+
+  function open() {
+    if (win && !win.isDestroyed()) {
+      win.show();
+      win.focus();
+      return;
+    }
+    createWindow();
+  }
+
+  function close() {
+    if (win && !win.isDestroyed()) {
+      try { win.close(); } catch {}
+    }
+    win = null;
+  }
+
+  function progress(event, payload) {
+    if (win && !win.isDestroyed()) {
+      try { win.webContents.send("onboarding:progress", { event, ...payload }); }
+      catch {}
+    }
+  }
+
+  // ── IPC handlers ───────────────────────────────────────────────────────
+  const handlers = {
+    "onboarding:get-state": async () => {
+      const chat = ctx.getChat();
+      const url = ctx.getSidecarUrl();
+      // /api/onboarding is best-effort: if the sidecar isn't up yet
+      // (typical for first launch) we synthesize a reasonable default.
+      let snapshot = null;
+      try {
+        const r = await httpJson("GET", `${url}/api/onboarding`, null, 1500);
+        snapshot = r.json;
+      } catch {}
+      const modelDir = chat && chat.getModelDir ? chat.getModelDir() : null;
+      const defaultModelDir = chat && chat.getDefaultModelDir ? chat.getDefaultModelDir() : null;
+      const modelPresent = chat && chat.isModelPresent ? chat.isModelPresent() : false;
+      return {
+        sidecarUrl: url,
+        sidecarReachable: !!snapshot,
+        modelDir,
+        defaultModelDir,
+        modelPresent,
+        device: snapshot ? snapshot.device : null,
+        platform: process.platform,
+        appVersion: app.getVersion(),
+      };
+    },
+
+    "onboarding:check-disk": async () => {
+      // Cheap proxy: try to write a tiny file to userData, then unlink.
+      // We don't need exact free-bytes for MVP — just confirm writability.
+      try {
+        const probe = userDataPath(".onboarding-probe");
+        fs.writeFileSync(probe, "ok");
+        fs.unlinkSync(probe);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    },
+
+    "onboarding:list-devices": async () => {
+      try {
+        const r = await httpJson("GET", `${ctx.getSidecarUrl()}/api/devices`, null, 2000);
+        return r.json || { available: ["cpu"], recommended: "cpu" };
+      } catch (err) {
+        // Sidecar isn't up yet — synthesize from platform.
+        if (isMac && process.arch === "arm64") {
+          return {
+            available: ["mps", "cpu"],
+            recommended: "mps",
+            current: null,
+            reasons: { mps: "Apple Silicon GPU (Metal)", cpu: "纯 CPU 推理" },
+            offline: true,
+          };
+        }
+        return {
+          available: ["cpu"],
+          recommended: "cpu",
+          current: null,
+          reasons: { cpu: "纯 CPU 推理" },
+          offline: true,
+        };
+      }
+    },
+
+    "onboarding:select-device": async (_evt, { device } = {}) => {
+      // Persist for next sidecar start; if sidecar is already up, ask it
+      // to record the env var too (no-op when not running).
+      process.env.MINICPM_DEVICE = device || "";
+      try {
+        await httpJson("POST", `${ctx.getSidecarUrl()}/api/set-device`, { device }, 1500);
+      } catch {}
+      return { ok: true, device };
+    },
+
+    "onboarding:pick-local-model": async () => {
+      const ret = await dialog.showOpenDialog({
+        title: "选择已有的 MiniCPM 模型目录",
+        properties: ["openDirectory"],
+        message: "目录中必须包含 config.json",
+      });
+      if (ret.canceled || !ret.filePaths.length) return { ok: false, canceled: true };
+      const dir = ret.filePaths[0];
+      const cfg = path.join(dir, "config.json");
+      if (!fs.existsSync(cfg)) {
+        return { ok: false, error: `所选目录不包含 config.json：\n${dir}` };
+      }
+      const chat = ctx.getChat();
+      if (chat && chat.setModelDir) chat.setModelDir(dir);
+      return { ok: true, modelDir: dir };
+    },
+
+    "onboarding:start-model-download": async () => {
+      // Make sure the sidecar is running before kicking off the SSE.
+      // We need /api/update-apply to be reachable.
+      const r = await ctx.ensureSidecarRunning();
+      if (!r || r.ok === false) {
+        const msg = (r && r.error) || "sidecar 启动失败";
+        progress("error", { phase: "sidecar-start", message: msg });
+        return { ok: false, error: msg };
+      }
+      const url = `${ctx.getSidecarUrl()}/api/update-apply`;
+      progress("start", { phase: "download" });
+      const result = await postSSE(url, (ev) => progress("download", ev));
+      progress("done", { phase: "download", ok: result.ok });
+      return result;
+    },
+
+    "onboarding:warmup": async () => {
+      // Sidecar may need to load weights for the first time — give it
+      // generous timeout (matches Sidecar._spawnAndWait deadline).
+      progress("start", { phase: "warmup" });
+      const ready = await ctx.ensureSidecarRunning();
+      if (!ready || ready.ok === false) {
+        const msg = (ready && ready.error) || "sidecar 未就绪";
+        progress("error", { phase: "sidecar-start", message: msg });
+        return { ok: false, error: msg };
+      }
+      try {
+        const r = await httpJson("POST", `${ctx.getSidecarUrl()}/api/warmup`, {}, 120_000);
+        progress("done", { phase: "warmup", elapsed_ms: r.json && r.json.elapsed_ms });
+        return { ok: true, ...(r.json || {}) };
+      } catch (err) {
+        progress("error", { phase: "warmup", message: String(err && err.message || err) });
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    },
+
+    "onboarding:complete": async () => {
+      writeSentinel({ device: process.env.MINICPM_DEVICE || "auto" });
+      try { ctx.onComplete && ctx.onComplete(); } catch (err) {
+        log(`[onboarding] onComplete callback failed: ${err && err.message}`);
+      }
+      close();
+      return { ok: true };
+    },
+
+    "onboarding:reset": async () => {
+      reset();
+      return { ok: true };
+    },
+  };
+
+  for (const [ch, fn] of Object.entries(handlers)) {
+    try { ipcMain.removeHandler(ch); } catch {}
+    ipcMain.handle(ch, fn);
+  }
+
+  return {
+    shouldShow,
+    open,
+    close,
+    reset,
+    isOpen: () => !!(win && !win.isDestroyed()),
+  };
+};
