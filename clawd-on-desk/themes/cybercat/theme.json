@@ -63,7 +63,7 @@
 
   "miniMode": {
     "supported": true,
-    "offsetRatio": 0.45,
+    "offsetRatio": 0.42,
     "states": {
       "mini-idle":       ["cybercat-mini-idle.gif"],
       "mini-working":    ["cybercat-mini-working.gif"],
