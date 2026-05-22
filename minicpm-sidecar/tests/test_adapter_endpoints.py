@@ -174,6 +174,28 @@ def test_load_adapter_null_unloads(app_with_stub_llama, adapter_dir):
         assert client.get("/api/health").json()["adapter"] is None
 
 
+def test_load_adapter_null_restarts_llama_when_lora_was_loaded(
+    app_with_stub_llama, adapter_dir
+):
+    """When llama-server was booted with `--lora <X>` and the user
+    switches back to Base, the gateway MUST restart llama-server with
+    no `--lora` flag — the pinned llama.cpp build can't honour a
+    per-request `lora: []` to disable an already-loaded adapter, so
+    failing to restart leaks the persona bias into base chat."""
+    app, _, instance = app_with_stub_llama
+    target = adapter_dir / "lora_neko.gguf"
+    # Simulate the post-load state: llama-server was rebooted with
+    # nekoqa preloaded.
+    instance.adapter_paths = [target]
+    with TestClient(app) as client:
+        r = client.post("/api/load-adapter", json={"path": None})
+        assert r.status_code == 200, r.text
+    # reload_adapters called with empty list → llama-server respawns
+    # without any --lora, which is the only reliable way to fully
+    # unload on the pinned vendor build.
+    instance.reload_adapters.assert_awaited_with([])
+
+
 def test_load_adapter_rejects_non_gguf(app_with_stub_llama, adapter_dir):
     app, _, _ = app_with_stub_llama
     junk = adapter_dir / "not_a_lora.txt"
@@ -191,7 +213,7 @@ def test_load_adapter_rejects_missing_file(app_with_stub_llama, adapter_dir):
         assert r.status_code == 400
 
 
-def test_chat_omits_lora_when_no_adapter_active(app_with_stub_llama):
+def test_chat_forces_empty_lora_when_no_adapter_active(app_with_stub_llama):
     app, captured, _ = app_with_stub_llama
     with TestClient(app) as client:
         r = client.post(
@@ -199,9 +221,13 @@ def test_chat_omits_lora_when_no_adapter_active(app_with_stub_llama):
             json={"messages": [{"role": "user", "content": "hi"}], "stream": False},
         )
         assert r.status_code == 200
-    # No adapter active → gateway should pass lora=None which we map to
-    # "don't include the field" downstream.
-    assert captured["lora_kwarg"] is None
+    # No adapter active → gateway must send lora=[] explicitly so
+    # llama-server disables every preloaded adapter for this request.
+    # Returning None here used to leak the boot-time global scale of
+    # the first --lora into base chat, which surfaced as the 猫娘
+    # persona bleeding through even after switching back to Base
+    # (real-world bug observed 2026-05-22).
+    assert captured["lora_kwarg"] == []
 
 
 def test_chat_includes_lora_when_adapter_active(app_with_stub_llama, adapter_dir):

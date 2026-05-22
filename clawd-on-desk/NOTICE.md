@@ -13,7 +13,7 @@ switching, and desktop-pet narration for coding agents.
 Both the upstream project and this fork are licensed under the
 GNU Affero General Public License v3.0 (AGPL-3.0-only); see
 [LICENSE](./LICENSE) for the full text. Source code for this fork is
-available at https://github.com/EEEEEKKO/MiniCPM-test.
+available at https://github.com/OpenBMB/MiniCPM-Desk-Pet.
 
 ---
 

@@ -939,13 +939,18 @@ async function runAdapterList() {
 
 async function runAdapterOff(progress) {
   await (progress || (() => {}))("正在卸下 LoRA，回到原版需要几秒…");
-  const r = await fetch(sidecarUrl + "/api/load-adapter", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: null }),
-  });
-  const d = await r.json();
-  if (!r.ok || !d.ok) return { ok: false, text: "卸载失败：" + (d.error || r.status) };
+  // Route through the main-proc IPC so we get the same 90s timeout
+  // and the same `active_adapter_id` persistence the Settings tab
+  // enjoys. Direct fetch from the renderer used to hit a shorter
+  // implicit timeout on cold restart of llama-server and skipped
+  // the prefs write, leaving the user's choice unsaved across
+  // sidecar restarts.
+  const d = (window.minicpm && window.minicpm.loadAdapter)
+    ? await window.minicpm.loadAdapter(null)
+    : null;
+  if (!d || !d.ok) {
+    return { ok: false, text: "卸载失败：" + ((d && d.error) || "unknown") };
+  }
   return {
     ok: true,
     text: "好啦，LoRA 卸下来了，现在是裸 base 模型（清空了对话）",
@@ -1030,13 +1035,16 @@ async function runAdapterSwitchByKeyword(keyword, fullMessage, progress) {
   async function doSwap(picked) {
     const label = picked.displayName || picked.name;
     await onProgress(`正在切到 ${label}…加载 LoRA 大概要几秒`);
-    const swap = await fetch(sidecarUrl + "/api/load-adapter", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: picked.path }),
-    });
-    const sd = await swap.json();
-    if (!swap.ok || !sd.ok) return { ok: false, text: "切换失败：" + (sd.error || swap.status) };
+    // Route through the main-proc IPC (same handler the Settings tab
+    // uses) so we share its 90s timeout + the `active_adapter_id`
+    // persistence. The direct-fetch flow used to skip both: chat-side
+    // switches worked in the current session but didn't survive a
+    // sidecar restart, and a cold reload (Base → LoRA) sometimes
+    // hit shorter renderer timeouts.
+    const sd = (window.minicpm && window.minicpm.loadAdapter)
+      ? await window.minicpm.loadAdapter(picked.path)
+      : null;
+    if (!sd || !sd.ok) return { ok: false, text: "切换失败：" + ((sd && sd.error) || "unknown") };
 
     // Persona-LoRAs don't follow the <think> chat template, so flip
     // thinking off when switching INTO one. Going back to base leaves

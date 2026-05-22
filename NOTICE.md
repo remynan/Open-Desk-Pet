@@ -15,7 +15,7 @@ narration for coding agents.
 This project and its upstream are licensed under the GNU Affero General
 Public License v3.0 (AGPL-3.0-only); see [LICENSE](./LICENSE) for the
 full text. Source code is available at
-https://github.com/EEEEEKKO/MiniCPM-test.
+https://github.com/OpenBMB/MiniCPM-Desk-Pet.
 
 ---
 

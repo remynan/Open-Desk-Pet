@@ -1,19 +1,19 @@
 ---
 name: deploy-minicpm-pet
 description: >-
-  [开发者向] 帮 contributor / 开发者从源码 dev 模式跑通 MiniCPM-test。
+  [开发者向] 帮 contributor / 开发者从源码 dev 模式跑通 MiniCPM-Desk-Pet。
   普通用户应直接下载 dmg 安装包，跟着 Onboarding 引导走，不应触发本 skill。
   Use when a developer clones the repo and wants to run it from source, or asks to
   "部署桌宠 (从源码)", "跑起来 MiniCPM dev 模式", or hits errors during go.sh / npm start / uv sync.
 ---
 
-# Deploying MiniCPM-test (开发者从源码)
+# Deploying MiniCPM-Desk-Pet (开发者从源码)
 
-> **重要**：这个 Skill 只针对开发者。普通最终用户走的是 **下载 dmg → Onboarding** 流程，不应使用本 Skill。如果对方只是想"用一下这个应用"，请引导他们去 [Releases](https://github.com/EEEEEKKO/MiniCPM-test/releases) 下载 dmg。
+> **重要**：这个 Skill 只针对开发者。普通最终用户走的是 **下载 dmg → Onboarding** 流程，不应使用本 Skill。如果对方只是想"用一下这个应用"，请引导他们去 [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) 下载 dmg。
 
 > v0.8 起推理后端从 PyTorch / transformers 切换到 llama.cpp。本 Skill 已按 v0.9 平铺布局更新；如果遇到引用 `minicpm-pet-bridge*` 的旧文档，请以 [docs/llama-cpp-migration.md](../../docs/llama-cpp-migration.md) 为准。
 
-This skill walks the agent through deploying the MiniCPM-test project on a colleague's machine **from source**. The project has 3 moving parts that need to come up in the right order: `llama-server` (compiled from vendored llama.cpp), the FastAPI `gateway`, and the Electron `clawd-on-desk` app.
+This skill walks the agent through deploying the MiniCPM-Desk-Pet project on a colleague's machine **from source**. The project has 3 moving parts that need to come up in the right order: `llama-server` (compiled from vendored llama.cpp), the FastAPI `gateway`, and the Electron `clawd-on-desk` app.
 
 ## Quick assessment first
 

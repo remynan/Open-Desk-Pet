@@ -1,4 +1,4 @@
-# MiniCPM-test
+# MiniCPM-Desk-Pet
 
 本地 MiniCPM5-0.9B 模型 + 桌宠交互的实验项目。基于 [llama.cpp](https://github.com/ggml-org/llama.cpp)
 的 `llama-server` 做 GGUF 推理（Apple Silicon → Metal，NVIDIA → CUDA，
@@ -15,7 +15,7 @@ coding agent 完成事件触发桌宠主动旁白。
 
 ### 安装
 
-1. 从 [Releases](https://github.com/EEEEEKKO/MiniCPM-test/releases) 下载 `Clawd-on-Desk-*-arm64.dmg`（仅 macOS Apple Silicon）。
+1. 从 [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) 下载 `Clawd-on-Desk-*-arm64.dmg`（仅 macOS Apple Silicon）。
 2. 双击 dmg，把应用拖进 Applications。
 3. 首次打开应用时，macOS 可能提示 "无法验证开发者"：
    - **右键** 应用图标 → **打开** → 在弹窗里点 **打开**；或
@@ -51,8 +51,8 @@ coding agent 完成事件触发桌宠主动旁白。
 参见 [docs/development.md](docs/development.md)。简要：
 
 ```bash
-git clone git@github.com:EEEEEKKO/MiniCPM-test.git
-cd MiniCPM-test
+git clone git@github.com:OpenBMB/MiniCPM-Desk-Pet.git
+cd MiniCPM-Desk-Pet
 mkdir -p models
 # Drop a GGUF you already have, or let Onboarding download one on first launch.
 cp /path/to/your/minicpm5-0.9b.Q4_K_M.gguf models/

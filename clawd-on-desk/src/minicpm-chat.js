@@ -301,6 +301,10 @@ class Sidecar {
     // /api/load-adapter see the same directory Settings → "open adapter
     // folder" exposes to the user.
     this.adapterDir = adapterDir || null;
+    // Mutable: which LoRA (if any) the user wants loaded at this
+    // sidecar's startup. We re-read prefs each respawn so a swap done
+    // via Settings persists across an explicit "Restart Sidecar".
+    this.activeAdapterPath = null;
     // Append-mode file stream where every stdout / stderr line from the
     // sidecar gets persisted to <userData>/logs/sidecar.log. Critical
     // for packaged builds where console.log goes nowhere.
@@ -427,6 +431,11 @@ class Sidecar {
       // Point gateway at the writable user adapter dir so /api/adapters
       // and /api/load-adapter see exactly what Settings UI shows.
       MINICPM_ADAPTER_DIR: this.adapterDir || process.env.MINICPM_ADAPTER_DIR || "",
+      // Boot directly into the user's persisted LoRA choice. Empty
+      // string (or unset) means "boot Base, no LoRA loaded" — the
+      // gateway then refrains from passing any --lora flag, keeping
+      // memory minimal for users who never opt in to a persona.
+      MINICPM_ACTIVE_ADAPTER: this.activeAdapterPath || process.env.MINICPM_ACTIVE_ADAPTER || "",
     };
 
     let proc;
@@ -680,6 +689,40 @@ module.exports = function initMinicpmChat(ctx) {
     return getDefaultAdapterDir();
   }
 
+  // ── Active adapter persistence ────────────────────────────────────────
+  // We persist the user's choice of "currently active LoRA" so the next
+  // sidecar spawn loads it directly via --lora (instead of preloading
+  // every .gguf we find on disk just in case). Storage key is the
+  // manifest entry's stable `id` (e.g. "preset:nekoqa" / "upload:...");
+  // a path lookup at spawn time resolves it against the latest manifest,
+  // so renames / moves don't break the link. `null` (or missing key)
+  // means "start in pure Base mode — no LoRA loaded".
+  function getActiveAdapterId() {
+    let raw = {};
+    try { raw = readMinicpmPrefsRaw(); } catch {}
+    if (typeof raw.active_adapter_id === "string" && raw.active_adapter_id.trim()) {
+      return raw.active_adapter_id.trim();
+    }
+    return null;
+  }
+  function setActiveAdapterId(id) {
+    // null / "" clears the persisted choice → next launch boots Base.
+    const next = (typeof id === "string" && id.trim()) ? id.trim() : null;
+    mergeMinicpmPrefs({ active_adapter_id: next });
+    return next;
+  }
+  function resolveActiveAdapterPath() {
+    const id = getActiveAdapterId();
+    if (!id) return null;
+    const manifest = readAdapterManifest();
+    const entry = (manifest.items || []).find((it) => it && it.id === id);
+    if (!entry || !entry.path) return null;
+    try {
+      if (!fs.existsSync(entry.path)) return null;
+    } catch { return null; }
+    return entry.path;
+  }
+
   // ── Adapter manifest (display names + aliases) ────────────────────────
   //
   // The gateway only knows about physical *.gguf files and a coarse
@@ -836,6 +879,51 @@ module.exports = function initMinicpmChat(ctx) {
     writeAdapterManifest({ version: 1, items });
   }
 
+  // Repair pass: bundled-preset entries whose `path` no longer exists
+  // (because the user moved their dev checkout, reinstalled the app
+  // under a different userData, etc.) get re-bound to whatever .gguf
+  // their `filenameHint` resolves to in the current adapter dir. User-
+  // upload entries are NEVER auto-repaired — they're surfaced as
+  // `missing: true` in the UI so the user can decide what to do.
+  function repairBundledManifestPaths() {
+    const manifest = readAdapterManifest();
+    if (!manifest.items || manifest.items.length === 0) return;
+    const dir = path.resolve(getEffectiveAdapterDir());
+    let dirty = false;
+    for (const entry of manifest.items) {
+      if (!entry || entry.source !== "bundled") continue;
+      let needsRepair = true;
+      try {
+        if (entry.path && fs.existsSync(entry.path)) {
+          // Existence alone isn't enough: when the user switches between
+          // dev (`<repo>/adapters/`) and packaged (`<userData>/adapters/`),
+          // the previous run's path may still resolve on disk while the
+          // gateway scans a different dir. Only treat the entry as
+          // healthy when its path lives under the *current* effective
+          // adapter dir — otherwise the IPC merge layer can't match it
+          // up with what gateway returns and the chip falls into the
+          // missing-file branch.
+          const resolvedEntry = path.resolve(entry.path);
+          if (resolvedEntry === dir || resolvedEntry.startsWith(dir + path.sep)) {
+            needsRepair = false;
+          }
+        }
+      } catch {}
+      if (!needsRepair) continue;
+      const preset = DEFAULT_PRESET_ENTRIES.find((p) => p.id === entry.id);
+      if (!preset || !preset.filenameHint) continue;
+      const found = findAdapterByHint(dir, preset.filenameHint);
+      if (!found) {
+        log(`[minicpm] bundled preset ${entry.id} path '${entry.path}' missing in ${dir}`);
+        continue;
+      }
+      log(`[minicpm] repaired ${entry.id} path: ${entry.path} -> ${found}`);
+      entry.path = found;
+      dirty = true;
+    }
+    if (dirty) writeAdapterManifest(manifest);
+  }
+
   // Copy bundled adapters (from <resources>/adapters/) into the
   // writable user dir on first run. Cheap idempotent walk; skips
   // anything the user already has. Runs once before the sidecar
@@ -850,6 +938,12 @@ module.exports = function initMinicpmChat(ctx) {
   // the gateway to read on its first /api/adapters call.
   try { seedDefaultManifest(); } catch (err) {
     log(`[minicpm] seedDefaultManifest threw: ${err && err.message}`);
+  }
+  // After seeding, repair any bundled preset whose recorded path went
+  // stale (typical when a dev manifest got carried into a packaged
+  // install, or vice versa).
+  try { repairBundledManifestPaths(); } catch (err) {
+    log(`[minicpm] repairBundledManifestPaths threw: ${err && err.message}`);
   }
   // Always ensure the mirror exists, even when the manifest is non-empty
   // (user already has a manifest from a previous launch, but the mirror
@@ -867,6 +961,22 @@ module.exports = function initMinicpmChat(ctx) {
     logFile: sidecarLogPath,
     adapterDir,
   });
+  // Refresh `sidecar.activeAdapterPath` from prefs every time we're about
+  // to spawn. Lets the user pick a persona, restart the sidecar from
+  // Settings, and have the new choice take effect — without needing to
+  // wire Sidecar.start() into closure-only helpers.
+  function refreshActiveAdapterPath() {
+    try {
+      sidecar.activeAdapterPath = resolveActiveAdapterPath();
+    } catch (err) {
+      sidecar.activeAdapterPath = null;
+      log(`[minicpm] resolveActiveAdapterPath failed: ${err && err.message}`);
+    }
+    return sidecar.activeAdapterPath;
+  }
+  // First evaluation: pick up whatever the user had selected last
+  // session. `null` means "boot Base, no --lora".
+  refreshActiveAdapterPath();
 
   let bubble = null;
   let activeSide = "right";
@@ -2015,7 +2125,26 @@ module.exports = function initMinicpmChat(ctx) {
 
       const r = await httpJson("POST", `${sidecar.baseUrl()}/api/load-adapter`, payload || {}, 90000).catch(() => null);
       const data = r ? r.json : null;
+      // Persist the user's choice so the next sidecar spawn loads
+      // exactly this LoRA via --lora (or no --lora at all when
+      // path is null). We resolve the manifest entry by path so the
+      // stored id stays in sync even after rename / re-import.
       if (data && data.ok) {
+        try {
+          if (!requested) {
+            setActiveAdapterId(null);
+          } else {
+            const manifest = readAdapterManifest();
+            const entry = (manifest.items || []).find((it) => {
+              try { return it && it.path && path.resolve(it.path) === path.resolve(requested); }
+              catch { return false; }
+            });
+            setActiveAdapterId(entry ? entry.id : null);
+          }
+          refreshActiveAdapterPath();
+        } catch (err) {
+          log(`[minicpm] persist active adapter failed: ${err && err.message}`);
+        }
         // Mirror the in-chat command UX: pop a fade-out reply bubble next
         // to the pet announcing the swap, and tell the renderer to wipe
         // its conversation history so the new persona starts clean.

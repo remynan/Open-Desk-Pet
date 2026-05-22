@@ -552,7 +552,7 @@ test("settings IPC serves agent/about/update/external and remove-theme dialog he
     assert.deepStrictEqual(await ipcMain.invoke("settings:get-about-info"), {
       version: "1.2.3",
       appName: "MiniCPM Desk Pet",
-      repoUrl: "https://github.com/EEEEEKKO/MiniCPM-test",
+      repoUrl: "https://github.com/OpenBMB/MiniCPM-Desk-Pet",
       license: "AGPL-3.0-only",
       copyright: "\u00a9 2026 OpenBMB",
       upstreamRepoUrl: "https://github.com/rullerzhou-afk/clawd-on-desk",

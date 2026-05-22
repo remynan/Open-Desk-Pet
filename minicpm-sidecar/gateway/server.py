@@ -270,28 +270,45 @@ def build_app(
     log = get_logger()
     bridge = ClawdBridge(enabled=True, debug=False)
 
-    # Resolve the adapter root *before* boot so we can pre-register every
-    # discovered GGUF LoRA via llama-server's `--lora`. This keeps adapter
-    # switching to "change in-memory current_adapter + inject per-request
-    # lora array" without restarting the subprocess.
+    # Resolve the adapter root so /api/adapters can scan it; we still
+    # show the full list to the UI even when none are loaded yet, so
+    # users can browse + activate any LoRA from Settings.
     adapter_root = _resolve_adapter_root(initial_model)
-    initial_adapter_items = (
-        discover_adapters([adapter_root]) if adapter_root else []
-    )
-    initial_adapter_paths = [Path(item["path"]) for item in initial_adapter_items]
+
+    # Boot-time LoRA load is now *opt-in*: only the LoRA the Electron
+    # host has persisted as the active one (env MINICPM_ACTIVE_ADAPTER)
+    # gets passed to llama-server via --lora. Default behaviour is pure
+    # Base — no third-party LoRA is preloaded just because it happens
+    # to live on disk. Switching to a different LoRA later triggers
+    # `LlamaServer.reload_adapters([new])`, costing one llama-server
+    # restart but keeping the steady-state memory minimal.
+    _env_active = os.environ.get("MINICPM_ACTIVE_ADAPTER", "").strip()
+    initial_active: Optional[Path] = None
+    if _env_active:
+        try:
+            cand = Path(_env_active).expanduser().resolve(strict=True)
+            if cand.suffix.lower() == ".gguf":
+                initial_active = cand
+            else:
+                log.warning("MINICPM_ACTIVE_ADAPTER ignored (not .gguf): %s", cand)
+        except FileNotFoundError:
+            log.warning("MINICPM_ACTIVE_ADAPTER points at missing file: %s", _env_active)
 
     server = LlamaServer(
         model_path=initial_model,
         ctx_size=ctx_size,
         n_gpu_layers=n_gpu_layers,
         threads=threads,
-        adapters=initial_adapter_paths,
+        adapters=[initial_active] if initial_active else [],
     )
 
     # In-memory adapter state. Single source of truth for what the
-    # Electron app sees as "the active LoRA". Updated by /api/load-adapter
-    # and consumed by /api/health + chat request routing below.
-    state: dict[str, Optional[Path]] = {"current_adapter": None}
+    # Electron app sees as "the active LoRA". Boots from the persisted
+    # choice; cleared on /api/load-adapter {path:null}; updated to a
+    # new path on /api/load-adapter {path:<gguf>}. The Electron host
+    # is responsible for writing the latest choice back to its prefs
+    # file so the next sidecar spawn boots into the same state.
+    state: dict[str, Optional[Path]] = {"current_adapter": initial_active}
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -491,6 +508,23 @@ def build_app(
         raw = payload.get("path")
         # path = null  →  deactivate any LoRA (back to base model)
         if raw is None or (isinstance(raw, str) and not raw.strip()):
+            # If llama-server was booted with `--lora <something>`, just
+            # zeroing in-memory `current_adapter` isn't enough — the
+            # pinned llama.cpp build (zhangtao2-1@c5ede29) doesn't honour
+            # a per-request `lora: []` as "disable preloaded adapters"
+            # the way newer upstream does, so the bias from the active
+            # LoRA's weights bleeds into base chat. The only reliable
+            # fix is to restart llama-server with no `--lora` flag at
+            # all. Same ~3-10s cost as switching to a new LoRA, but the
+            # only way to truly "unload" on this vendor pin.
+            if server.adapter_paths:
+                bridge.post("working", event="UnloadAdapter", title="卸载 LoRA")
+                try:
+                    await server.reload_adapters([])
+                except Exception as exc:
+                    bridge.post("error")
+                    return JSONResponse({"error": str(exc)}, status_code=500)
+                bridge.post("idle")
             state["current_adapter"] = None
             return {"ok": True, "adapter": None, "persona": "default"}
 
@@ -508,18 +542,18 @@ def build_app(
                 status_code=400,
             )
 
-        # If the requested adapter wasn't `--lora`-loaded at boot (user
-        # just dropped a new file into adapters/), tell llama-server to
-        # restart with the expanded list before activating. This is the
-        # one path where we pay a sidecar restart; subsequent toggles
-        # between known adapters are pure in-memory state changes.
+        # If the requested adapter isn't currently `--lora`-loaded,
+        # restart llama-server so that ONLY this adapter is loaded.
+        # We deliberately don't keep a growing list of preloaded LoRAs
+        # in memory — that was the old behaviour, and it meant any
+        # third-party `.gguf` on disk silently rode along whether the
+        # user wanted it or not. The user pays one sidecar restart
+        # (~3-4s) per LoRA switch, which matches the cost of switching
+        # base models and is the only honest way to keep memory tight.
         if server.adapter_id_for(target) is None:
-            current_paths = list(server.adapter_paths)
-            if target.resolve() not in {p.resolve() for p in current_paths}:
-                current_paths.append(target)
             bridge.post("working", event="LoadAdapter", title=f"加载 {target.name}")
             try:
-                await server.reload_adapters(current_paths)
+                await server.reload_adapters([target])
             except Exception as exc:
                 bridge.post("error")
                 return JSONResponse({"error": str(exc)}, status_code=500)
@@ -609,17 +643,28 @@ def build_app(
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
     def _lora_arr_for(req: ChatRequest) -> Optional[List[dict]]:
-        """Compute the per-request `lora` array (or None).
+        """Compute the per-request `lora` array.
 
         - disable_adapter=true  → []   (force base for this request)
         - active adapter set    → [{id, scale: 1.0}]
-        - no adapter active     → None (don't include the field at all)
+        - no adapter active     → []   (force base; see note below)
+
+        NOTE on the "no adapter active" case: we used to return None
+        here, expecting llama-server to fall back to base. That's
+        WRONG with our `--lora-init-without-apply` boot — the pinned
+        llama.cpp build (zhangtao2-1@c5ede29) doesn't actually zero
+        the global scale despite the flag name, so a missing `lora`
+        field leaves nekoqa applied at scale 1.0 and the user gets a
+        猫娘-flavoured response even after switching back to Base.
+        Sending an empty list explicitly disables every preloaded
+        adapter for THIS request, which is the bulletproof behaviour
+        we want.
         """
         if req.disable_adapter:
             return []
         current = state["current_adapter"]
         if not current:
-            return None
+            return []
         idx = server.adapter_id_for(current)
         if idx is None:
             # State got out of sync (e.g. sidecar restarted without
@@ -627,7 +672,7 @@ def build_app(
             # 500 — the user will notice the persona is gone and can
             # re-select from Settings.
             log.warning("active adapter %s missing from llama-server index", current)
-            return None
+            return []
         return [{"id": idx, "scale": 1.0}]
 
     @app.post("/api/chat")

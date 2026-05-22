@@ -46,9 +46,9 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EEEEEKKO/MiniCPM-test.git"
+    "url": "https://github.com/OpenBMB/MiniCPM-Desk-Pet.git"
   },
-  "homepage": "https://github.com/EEEEEKKO/MiniCPM-test",
+  "homepage": "https://github.com/OpenBMB/MiniCPM-Desk-Pet",
   "upstreamRepository": "https://github.com/rullerzhou-afk/clawd-on-desk",
   "type": "commonjs",
   "build": {
@@ -178,8 +178,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "EEEEEKKO",
-        "repo": "MiniCPM-test"
+        "owner": "OpenBMB",
+        "repo": "MiniCPM-Desk-Pet"
       }
     ]
   },

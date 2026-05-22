@@ -6,14 +6,14 @@ entry point for developers; deeper background lives in
 [clawd-on-desk/AGENTS.md](clawd-on-desk/AGENTS.md).
 
 > Looking to just use the app? Grab a prebuilt installer from
-> [Releases](https://github.com/EEEEEKKO/MiniCPM-test/releases). This
+> [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases). This
 > document is only relevant if you plan to modify the code.
 
 ## Quickstart (dev mode)
 
 ```bash
-git clone git@github.com:EEEEEKKO/MiniCPM-test.git
-cd MiniCPM-test
+git clone git@github.com:OpenBMB/MiniCPM-Desk-Pet.git
+cd MiniCPM-Desk-Pet
 
 ./go.sh doctor    # check that node 18+, uv, cmake are present
 ./go.sh setup     # install deps + first-time build of llama-server (~5–10 min)
@@ -30,7 +30,7 @@ before starting `./go.sh`.
 ## Repository layout
 
 ```
-MiniCPM-test/
+MiniCPM-Desk-Pet/
 ├── clawd-on-desk/      Electron desktop pet (vendored fork)
 ├── minicpm-sidecar/    llama.cpp + FastAPI gateway (inference service)
 ├── adapters/           LoRA persona adapters (.gguf + safetensors source)

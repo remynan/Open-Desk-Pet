@@ -17,8 +17,8 @@
 ## 快速上手 (dev 模式)
 
 ```bash
-git clone git@github.com:EEEEEKKO/MiniCPM-test.git
-cd MiniCPM-test
+git clone git@github.com:OpenBMB/MiniCPM-Desk-Pet.git
+cd MiniCPM-Desk-Pet
 
 # 把模型放进来 (~2 GB，跟生产用户不一样的是：dev 模式仍然走 <repo>/models/)
 mkdir -p models
@@ -49,7 +49,7 @@ MINICPM_FORCE_ONBOARDING=1 ./go.sh start
 ## 仓库结构
 
 ```
-MiniCPM-test/
+MiniCPM-Desk-Pet/
 ├── clawd-on-desk/              ← Electron 桌宠 (vendored fork of clawd-on-desk@5b1f003)
 │                                  + MiniCPM 集成层：聊天气泡 / Onboarding / Settings
 ├── minicpm-sidecar/            ← llama.cpp 推理服务 + 瘦 FastAPI gateway

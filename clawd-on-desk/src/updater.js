@@ -7,7 +7,7 @@ const productMetadata = require("./product-metadata");
 
 const isMac = process.platform === "darwin";
 const RELEASES_LATEST_URL = productMetadata.releasesLatestUrl
-  || "https://github.com/EEEEEKKO/MiniCPM-test/releases/latest";
+  || "https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases/latest";
 
 function makeTranslate(ctx) {
   return (key, fallback) => {
@@ -268,7 +268,7 @@ function initUpdater(ctx, deps = {}) {
   function fetchLatestRelease() {
     return new Promise((resolve, reject) => {
       const apiPath = productMetadata.githubReleasesApiPath
-        || "/repos/EEEEEKKO/MiniCPM-test/releases/latest";
+        || "/repos/OpenBMB/MiniCPM-Desk-Pet/releases/latest";
       const req = httpsGet({
         hostname: "api.github.com",
         path: apiPath,
