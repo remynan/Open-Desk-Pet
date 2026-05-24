@@ -11,7 +11,7 @@ description: >-
 
 > **重要**：这个 Skill 只针对开发者。普通最终用户走的是 **下载 dmg → Onboarding** 流程，不应使用本 Skill。如果对方只是想"用一下这个应用"，请引导他们去 [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) 下载 dmg。
 
-> v0.8 起推理后端从 PyTorch / transformers 切换到 llama.cpp。本 Skill 已按 v0.9 平铺布局更新；如果遇到引用 `minicpm-pet-bridge*` 的旧文档，请以 [docs/llama-cpp-migration.md](../../docs/llama-cpp-migration.md) 为准。
+> v0.8 起推理后端从 PyTorch / transformers 切换到 llama.cpp。本 Skill 已按 v0.9 平铺布局更新；sidecar 结构与构建方式以 [`minicpm-sidecar/README.md`](../../minicpm-sidecar/README.md) 为准。
 
 This skill walks the agent through deploying the MiniCPM-Desk-Pet project on a colleague's machine **from source**. The project has 3 moving parts that need to come up in the right order: `llama-server` (compiled from vendored llama.cpp), the FastAPI `gateway`, and the Electron `clawd-on-desk` app.
 

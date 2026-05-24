@@ -30,8 +30,8 @@ adapters/
 
 ## 从 PEFT safetensors 转成 GGUF
 
-llama.cpp 只认 GGUF 格式的 LoRA。`minicpm-sidecar/third_party/llama.cpp/convert_lora_to_gguf.py`
-（vendor 在 `scripts/clone-llama.sh` pin 的版本里）会把 PEFT 适配器 + 一份只读的 HF
+llama.cpp 只认 GGUF 格式的 LoRA。仓库顶层的 `llama.cpp/convert_lora_to_gguf.py`
+（submodule pin 的版本里）会把 PEFT 适配器 + 一份只读的 HF
 base config 拼成 llama-server 能消费的单文件 GGUF。
 
 ```bash
@@ -41,8 +41,8 @@ ADAPTER=adapters/lora_nekoqa_adapter_20260515_0738
 
 # 2. 跑转换脚本（需要一个带 torch + transformers 的 venv，
 #    本仓库的 minicpm-pet-bridge-uv/.venv 即可）
-minicpm-pet-bridge-uv/.venv/bin/python3 \
-  minicpm-sidecar/third_party/llama.cpp/convert_lora_to_gguf.py \
+python3 \
+  llama.cpp/convert_lora_to_gguf.py \
   --base "$BASE" \
   --outtype f16 \
   --outfile "$ADAPTER/adapter_model.f16.gguf" \

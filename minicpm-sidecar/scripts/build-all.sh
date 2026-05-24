@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot build: clone vendored llama.cpp, compile llama-server, and
+# One-shot build: ensure llama.cpp submodule, compile llama-server, and
 # package the gateway. Produces ../bin/<os>-<arch>/{minicpm-sidecar,llama-server}
 # ready to drop into clawd-on-desk's extraResources.
 

@@ -55,13 +55,13 @@ MiniCPM-Desk-Pet/
 ├── minicpm-sidecar/            ← llama.cpp 推理服务 + 瘦 FastAPI gateway
 ├── adapters/                   ← LoRA 适配器（.gguf + safetensors source）
 ├── skills/deploy-minicpm-pet/  ← Cursor Agent Skill（dev 部署引导）
-├── docs/                       ← 开发者文档，归档调研在 docs/archive/
+├── docs/                       ← 开发者文档
 ├── models/                     ← GGUF 模型文件（gitignored）
 ├── go.sh                       ← 开发者快捷脚本
 └── README.md                   ← 用户向（dmg 安装 + 引导）
 ```
 
-> v0.7 时代的双份 PyTorch sidecar（`minicpm-pet-bridge/` 与 `minicpm-pet-bridge-uv/`）以及 PyInstaller `build/sidecar.spec` 已在 v0.9 删除。如需历史信息，参考 [docs/archive/](archive/) 与 [docs/llama-cpp-migration.md](llama-cpp-migration.md)。
+> v0.7 时代的双份 PyTorch sidecar（`minicpm-pet-bridge/` 与 `minicpm-pet-bridge-uv/`）以及 PyInstaller `build/sidecar.spec` 已在 v0.9 删除。当前 sidecar 结构与构建方式以 [`minicpm-sidecar/README.md`](../minicpm-sidecar/README.md) 为准。
 
 ---
 

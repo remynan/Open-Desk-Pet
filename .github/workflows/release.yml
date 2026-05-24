@@ -36,6 +36,8 @@ jobs:
     name: mac-${{ matrix.triple }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -122,6 +124,8 @@ jobs:
     name: linux-x64
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -165,6 +169,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -176,11 +182,6 @@ jobs:
         run: |
           irm https://astral.sh/uv/install.ps1 | iex
           Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.local\bin"
-
-      - name: Clone llama.cpp
-        working-directory: minicpm-sidecar
-        shell: bash
-        run: ./scripts/clone-llama.sh
 
       - name: Build llama-server
         working-directory: minicpm-sidecar

@@ -15,7 +15,9 @@ dist/
 minicpm-sidecar/bin/
 minicpm-sidecar/build/build/
 minicpm-sidecar/build/dist/
-minicpm-sidecar/third_party/llama.cpp/
+
+# llama.cpp submodule build outputs (the submodule itself is tracked)
+llama.cpp/build/
 
 # Model weights — too big to ship, friends/colleagues download separately
 models/

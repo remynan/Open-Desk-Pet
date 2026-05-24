@@ -12,15 +12,16 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-SRC="$ROOT/third_party/llama.cpp"
+REPO_ROOT="$(cd "$ROOT/.." && pwd)"
+SRC="$REPO_ROOT/llama.cpp"
 BUILD="$SRC/build"
 
 cyan()  { printf "\033[36m%s\033[0m\n" "$*"; }
 red()   { printf "\033[31m%s\033[0m\n" "$*" >&2; }
 green() { printf "\033[32m%s\033[0m\n" "$*"; }
 
-if [[ ! -d "$SRC" ]]; then
-  red "$SRC 不存在。先跑 scripts/clone-llama.sh。"
+if [[ ! -e "$SRC/.git" ]]; then
+  red "$SRC 不存在。请先初始化 submodule：git submodule update --init llama.cpp"
   exit 1
 fi
 

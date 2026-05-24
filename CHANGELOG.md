@@ -13,13 +13,11 @@
 - 根级 [`LICENSE`](LICENSE)（AGPL-3.0-only，与 `clawd-on-desk/LICENSE` 同源）。
 - 根级 [`NOTICE.md`](NOTICE.md)：fork 声明 + llama.cpp / MiniCPM / OpenClaw 等第三方 attribution。
 - 根级 [`CONTRIBUTING.md`](CONTRIBUTING.md)：quickstart、测试要求、commit / PR 约定。
-- [`docs/archive/`](docs/archive/) 子目录，迁入 v0.7 时代的设计文档（[PRD-sidecar-cross-platform-refactor.md](docs/archive/PRD-sidecar-cross-platform-refactor.md)、[architecture-and-cross-platform-report.md](docs/archive/architecture-and-cross-platform-report.md)），并附 [`README.md`](docs/archive/README.md) 解释归档背景。
 
 ### 变更
 
 - [`README.md`](README.md) 删除 deprecated 目录段落，文档索引指向归档后的新路径，新增 CONTRIBUTING 链接。
 - [`docs/development.md`](docs/development.md) 删除 conda 路径、双份 sidecar 同步注意事项、旧 `build/build-sidecar.sh` 引用；"仓库结构"框图按新平铺布局重写。
-- [`docs/llama-cpp-migration.md`](docs/llama-cpp-migration.md) 旧 PyTorch sidecar / PyInstaller 路径改为历史叙述。
 - [`skills/deploy-minicpm-pet/SKILL.md`](skills/deploy-minicpm-pet/SKILL.md) 完整改写：所有 `minicpm-pet-bridge*` 引用替换为 `minicpm-sidecar`，安装步骤更新到 cmake + uv + 几十 MB gateway。
 - [`.gitignore`](.gitignore) 删除 `build/*` 历史例外规则。
 
@@ -30,7 +28,7 @@
 ### 新增
 
 - 单一推理目录 [`minicpm-sidecar/`](minicpm-sidecar/)，结构为「llama-server（vendor llama.cpp）+ 瘦 FastAPI gateway」。
-- vendor 子模块脚本 [`scripts/clone-llama.sh`](minicpm-sidecar/scripts/clone-llama.sh)（pin 在 [zhangtao2-1/llama.cpp@c5ede29](https://github.com/zhangtao2-1/llama.cpp)，即 [PR #23384](https://github.com/ggml-org/llama.cpp/pull/23384) 的 MiniCPM5 tokenizer 提交）。
+- 顶层 git submodule [`llama.cpp/`](llama.cpp)（pin 在 [zhangtao2-1/llama.cpp@c5ede29](https://github.com/zhangtao2-1/llama.cpp)，即 [PR #23384](https://github.com/ggml-org/llama.cpp/pull/23384) 的 MiniCPM5 tokenizer 提交）。
 - 各平台编译脚本：`scripts/build-llama.sh`（macOS / Linux）+ `scripts/build-llama.ps1`（Windows），按 `LLAMA_ACCEL=metal|cuda|cpu` 走 cmake。
 - Gateway PyInstaller 单文件打包：`scripts/build-gateway.sh` + [`build/gateway.spec`](minicpm-sidecar/build/gateway.spec)，无 torch 依赖，最终二进制几十 MB 量级。
 - `scripts/build-all.sh` / `scripts/run-dev.sh` 一站式入口。
@@ -60,7 +58,7 @@
 
 ### 文档
 
-- 新增 [`docs/llama-cpp-migration.md`](docs/llama-cpp-migration.md) 记录本次变动 + vendor 升级路径。
+- 新增过 `docs/llama-cpp-migration.md` 记录本次变动 + vendor 升级路径，后续文档精简时已移除。
 - [`README.md`](README.md) 顶部状态行 / 安装步骤 / 文档索引同步更新到 v0.8。
 - 旧的两套 bridge 目录写入 [`DEPRECATED.md`](minicpm-pet-bridge/DEPRECATED.md)。
 

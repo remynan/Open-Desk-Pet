@@ -10,10 +10,12 @@ name: Build sidecar (llama-server + gateway)
 on:
   push:
     paths:
+      - "llama.cpp"
       - "minicpm-sidecar/**"
       - ".github/workflows/build-sidecar.yml"
   pull_request:
     paths:
+      - "llama.cpp"
       - "minicpm-sidecar/**"
       - ".github/workflows/build-sidecar.yml"
   workflow_dispatch:
@@ -43,6 +45,8 @@ jobs:
         working-directory: minicpm-sidecar
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Install cmake (Linux)
         if: runner.os == 'Linux'
@@ -68,10 +72,6 @@ jobs:
         run: |
           irm https://astral.sh/uv/install.ps1 | iex
           Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.local\bin"
-
-      - name: Clone vendored llama.cpp
-        shell: bash
-        run: ./scripts/clone-llama.sh
 
       - name: Build llama-server (POSIX)
         if: runner.os != 'Windows'

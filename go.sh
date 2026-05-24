@@ -169,8 +169,9 @@ ensure_llama_server() {
     green "    ✓ llama-server 已存在 ($bin)"
     return 0
   fi
-  cyan "    首次构建 llama-server（这要 ~5-10 分钟，下载 + 编译 llama.cpp）..."
-  ( cd "$SIDECAR_DIR" && ./scripts/clone-llama.sh && ./scripts/build-llama.sh )
+  cyan "    首次构建 llama-server（这要 ~5-10 分钟，初始化 submodule + 编译）..."
+  git -C "$HERE" submodule update --init --depth 1 llama.cpp
+  ( cd "$SIDECAR_DIR" && ./scripts/build-llama.sh )
   green "    ✓ llama-server 已就绪"
 }
 
@@ -239,7 +240,8 @@ case "$cmd" in
     ;;
   build-llama)
     check_environment
-    ( cd "$SIDECAR_DIR" && ./scripts/clone-llama.sh && ./scripts/build-llama.sh )
+    git -C "$HERE" submodule update --init --depth 1 llama.cpp
+    ( cd "$SIDECAR_DIR" && ./scripts/build-llama.sh )
     ;;
   run|"")
     check_environment

@@ -11,11 +11,12 @@ $ErrorActionPreference = "Stop"
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Resolve-Path (Join-Path $here "..")
-$src  = Join-Path $root "third_party\llama.cpp"
+$repoRoot = Resolve-Path (Join-Path $root "..")
+$src  = Join-Path $repoRoot "llama.cpp"
 $build = Join-Path $src "build"
 
 if (-not (Test-Path $src)) {
-  Write-Error "$src not found. Run scripts/clone-llama.sh first (git bash works on Windows too)."
+  Write-Error "$src not found. Run: git submodule update --init llama.cpp"
 }
 
 $accel = if ($env:LLAMA_ACCEL) { $env:LLAMA_ACCEL } else { "cpu" }

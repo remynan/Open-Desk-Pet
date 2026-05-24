@@ -2,7 +2,7 @@
 # Launch the gateway in dev mode against an already-built llama-server.
 #
 # Prerequisites:
-#   ./clone-llama.sh && ./build-llama.sh    # one-time
+#   git submodule update --init llama.cpp && ./build-llama.sh   # one-time
 #   uv sync                                 # populates .venv/
 #
 # Usage:

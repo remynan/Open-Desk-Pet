@@ -13,7 +13,7 @@ Electron (clawd-on-desk)
 gateway (FastAPI, 无 torch)             ← 本目录 gateway/
    │ HTTP :18766 OpenAI-compat (stream)
    ▼
-llama-server (原生 C++)                 ← third_party/llama.cpp 构建产物
+llama-server (原生 C++)                 ← 顶层 llama.cpp/ submodule 构建产物
    │
    ▼
 *.gguf  在 <userData>/models/
@@ -38,6 +38,9 @@ Electron 只 spawn `minicpm-sidecar`，由 gateway 自己 fork 出 `llama-server
 ## 目录
 
 ```
+<repo-root>/
+  llama.cpp/                  # git submodule（zhangtao2-1/llama.cpp @ pinned commit）
+
 minicpm-sidecar/
   gateway/                  # FastAPI gateway 源码
     __main__.py             # 入口：python -m gateway --model ... --port ...
@@ -47,14 +50,12 @@ minicpm-sidecar/
     clawd_state.py          # 桌宠状态推送（从旧 bridge 移植）
     updater.py              # GGUF 模型下载/校验
     log_setup.py            # 跨平台日志目录解析
-  third_party/
-    llama.cpp/              # 由 scripts/clone-llama.sh 克隆（vendor 版）
   scripts/
-    clone-llama.sh          # git clone 指定 PR 提交到 third_party/llama.cpp
+    clone-llama.sh          # 确保 llama.cpp submodule 已初始化
     build-llama.sh          # cmake 编 llama-server（mac/linux）
     build-llama.ps1         # 同上（windows）
     build-gateway.sh        # PyInstaller 出 gateway 单文件
-    build-all.sh            # 一键：clone + 编 llama + 编 gateway
+    build-all.sh            # 一键：init submodule + 编 llama + 编 gateway
     run-dev.sh              # 本地开发：直接启动 gateway，由它拉 llama-server
   build/
     gateway.spec            # PyInstaller spec（gateway 用）
@@ -65,8 +66,8 @@ minicpm-sidecar/
 ## 开发态启动
 
 ```bash
-# 1) 第一次：克隆 vendor 分支并编 llama-server
-./scripts/clone-llama.sh
+# 1) 第一次：初始化 llama.cpp submodule 并编 llama-server
+git submodule update --init llama.cpp   # 在仓库根目录
 ./scripts/build-llama.sh
 
 # 2) 安装 gateway 依赖（瘦小，几十 MB）
@@ -88,15 +89,16 @@ uv sync
 # 之后由 clawd-on-desk/package.json 的 extraResources 自动打入安装包
 ```
 
-## Vendor 分支
+## Submodule / Vendor 分支
 
-当前 `llama-server` 编自 [zhangtao2-1/llama.cpp](https://github.com/zhangtao2-1/llama.cpp) 的 MiniCPM5 tokenizer 适配提交（[PR #23384](https://github.com/ggml-org/llama.cpp/pull/23384)）。
+`llama.cpp` 作为仓库顶层的 git submodule 存在，当前 pin 在 [zhangtao2-1/llama.cpp](https://github.com/zhangtao2-1/llama.cpp) 的 MiniCPM5 tokenizer 适配提交（[PR #23384](https://github.com/ggml-org/llama.cpp/pull/23384)）。
 
 PR 已根据 maintainer 反馈关闭，长期会合到 `ggml-org/llama.cpp` 主线后切换。upstream 合并后：
 
-1. 把 `scripts/clone-llama.sh` 里的 `REMOTE` 改回 `https://github.com/ggml-org/llama.cpp.git`，`REF` 改成对应 tag。
-2. 跑一次 `./scripts/build-all.sh`。
-3. 用 golden prompt 对一遍 token 与中文输出，与旧 HF 模型对齐。
+1. 修改 `.gitmodules` 中的 `url` 为 `https://github.com/ggml-org/llama.cpp.git`。
+2. `cd llama.cpp && git fetch origin <tag> && git checkout <tag>`，然后在仓库根 `git add llama.cpp`。
+3. 跑一次 `./scripts/build-all.sh`。
+4. 用 golden prompt 对一遍 token 与中文输出，与旧 HF 模型对齐。
 
 ## API
 

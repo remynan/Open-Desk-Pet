@@ -2,7 +2,7 @@
 
 Owns the lifecycle of a single `llama-server` child:
   - resolve the binary (next to ourselves in packaged mode, or from
-    third_party/llama.cpp/build/bin in dev)
+    <repo-root>/llama.cpp/build/bin in dev)
   - spawn it with the right `--model / --port / --ctx-size` flags
   - poll `GET /health` until ready
   - proxy `POST /v1/chat/completions` streams back to the caller
@@ -56,7 +56,7 @@ def _candidate_binary_paths() -> list[Path]:
     2. Next to ourselves    — packaged sidecar lives in
        <resources>/sidecar-bin/  alongside llama-server[.exe]
     3. minicpm-sidecar/bin/<os>-<arch>/  — `scripts/build-llama.sh` output
-    4. third_party/llama.cpp/build/bin/  — vanilla cmake build location
+    4. <repo-root>/llama.cpp/build/bin/  — submodule cmake build location
     """
     exe = "llama-server.exe" if platform.system() == "Windows" else "llama-server"
     override = os.environ.get("MINICPM_LLAMA_SERVER")
@@ -69,12 +69,13 @@ def _candidate_binary_paths() -> list[Path]:
         # the install dir where llama-server sits too.
         out.append(Path(sys.executable).resolve().parent / exe)
     else:
-        # Dev: file → gateway/ → minicpm-sidecar/
+        # Dev: file → gateway/ → minicpm-sidecar/ → repo-root/
         pkg_root = Path(__file__).resolve().parent.parent
+        repo_root = pkg_root.parent
         triple = _platform_triple()
         out.append(pkg_root / "bin" / triple / exe)
-        out.append(pkg_root / "third_party" / "llama.cpp" / "build" / "bin" / exe)
-        out.append(pkg_root / "third_party" / "llama.cpp" / "build" / exe)
+        out.append(repo_root / "llama.cpp" / "build" / "bin" / exe)
+        out.append(repo_root / "llama.cpp" / "build" / exe)
 
     # As a last resort, look it up on PATH so a `brew install llama.cpp`
     # checkout works in dev.
@@ -180,7 +181,7 @@ class LlamaServer:
                 continue
         searched = "\n  ".join(str(p) for p in _candidate_binary_paths())
         raise FileNotFoundError(
-            "找不到 llama-server。请先编译：minicpm-sidecar/scripts/build-llama.sh。\n"
+            "找不到 llama-server。请先初始化 submodule 并编译：git submodule update --init llama.cpp && cd minicpm-sidecar && ./scripts/build-llama.sh。\n"
             f"  已检查的路径:\n  {searched}"
         )
 
