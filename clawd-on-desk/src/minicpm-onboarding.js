@@ -27,6 +27,7 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const os = require("os");
+const minicpmI18n = require("./minicpm-i18n");
 
 const isMac = process.platform === "darwin";
 const SENTINEL_FILE = "minicpm-onboarding.json";
@@ -117,6 +118,19 @@ module.exports = function initOnboarding(ctx) {
   //                         apps never reach `window-all-closed` → quit
   //                         on their own with no pet window or tray yet).
   const log = (msg) => { try { console.log(msg); } catch {} };
+  // Lang resolver: ctx.getLang() returns the effective UI language (already
+  // resolved from the "system" stored value by main.js). Fall back to "en"
+  // if main didn't wire one in (tests / older callers).
+  const getLang = () => {
+    try {
+      if (ctx && typeof ctx.getLang === "function") {
+        const v = ctx.getLang();
+        if (typeof v === "string" && v) return v;
+      }
+    } catch {}
+    return "en";
+  };
+  const t = minicpmI18n.makeTranslator(getLang);
   let win = null;
   // True while the close was initiated by `onboarding:complete` (or any
   // other internal call to close()). Lets the `closed` handler tell user-
@@ -173,7 +187,7 @@ module.exports = function initOnboarding(ctx) {
       resizable: false,
       maximizable: false,
       fullscreenable: false,
-      title: "MiniCPM 桌宠 — 首次启动",
+      title: t("onboardingWindowTitle"),
       show: false,
       autoHideMenuBar: true,
       // Plain top-level window — not a panel — so it behaves like a
@@ -357,7 +371,7 @@ module.exports = function initOnboarding(ctx) {
             available: ["mps", "cpu"],
             recommended: "mps",
             current: null,
-            reasons: { mps: "Apple Silicon GPU (Metal)", cpu: "纯 CPU 推理" },
+            reasons: { mps: t("onboardingReasonMps"), cpu: t("onboardingReasonCpu") },
             offline: true,
           };
         }
@@ -365,7 +379,7 @@ module.exports = function initOnboarding(ctx) {
           available: ["cpu"],
           recommended: "cpu",
           current: null,
-          reasons: { cpu: "纯 CPU 推理" },
+          reasons: { cpu: t("onboardingReasonCpu") },
           offline: true,
         };
       }
@@ -386,10 +400,10 @@ module.exports = function initOnboarding(ctx) {
       // compat with users who pre-staged HF directories we accept a
       // directory too (the gateway picks the first .gguf inside).
       const ret = await dialog.showOpenDialog({
-        title: "选择本地 MiniCPM 模型 (.gguf 文件或包含 .gguf 的目录)",
+        title: t("onboardingPickerDialogTitle"),
         properties: ["openFile", "openDirectory"],
         filters: [{ name: "GGUF model", extensions: ["gguf"] }],
-        message: "可以是单个 .gguf 文件，或包含 .gguf 的目录",
+        message: t("onboardingPickerDialogMessage"),
       });
       if (ret.canceled || !ret.filePaths.length) return { ok: false, canceled: true };
       const picked = ret.filePaths[0];
@@ -400,11 +414,11 @@ module.exports = function initOnboarding(ctx) {
           const entries = fs.readdirSync(picked)
             .filter((n) => n.toLowerCase().endsWith(".gguf"));
           if (!entries.length) {
-            return { ok: false, error: `所选目录不包含 .gguf：\n${picked}` };
+            return { ok: false, error: t("onboardingPickerInvalidDir", { path: picked }) };
           }
           target = path.join(picked, entries[0]);
         } else if (!picked.toLowerCase().endsWith(".gguf")) {
-          return { ok: false, error: `请选择 .gguf 文件：\n${picked}` };
+          return { ok: false, error: t("onboardingPickerInvalidFile", { path: picked }) };
         }
       } catch (err) {
         return { ok: false, error: String(err && err.message || err) };
@@ -419,7 +433,7 @@ module.exports = function initOnboarding(ctx) {
       // We need /api/update-apply to be reachable.
       const r = await ctx.ensureSidecarRunning();
       if (!r || r.ok === false) {
-        const msg = (r && r.error) || "sidecar 启动失败";
+        const msg = (r && r.error) || t("onboardingSidecarStartFailed");
         progress("error", { phase: "sidecar-start", message: msg });
         return { ok: false, error: msg };
       }
@@ -436,7 +450,7 @@ module.exports = function initOnboarding(ctx) {
       progress("start", { phase: "warmup" });
       const ready = await ctx.ensureSidecarRunning();
       if (!ready || ready.ok === false) {
-        const msg = (ready && ready.error) || "sidecar 未就绪";
+        const msg = (ready && ready.error) || t("onboardingSidecarNotReady");
         progress("error", { phase: "sidecar-start", message: msg });
         return { ok: false, error: msg };
       }
@@ -483,6 +497,11 @@ module.exports = function initOnboarding(ctx) {
         return { ok: false, error: String(err && err.message || err) };
       }
     },
+
+    "onboarding:get-i18n": async () => {
+      const lang = getLang();
+      return { lang, strings: minicpmI18n.getStrings(lang) };
+    },
   };
 
   for (const [ch, fn] of Object.entries(handlers)) {
@@ -490,11 +509,25 @@ module.exports = function initOnboarding(ctx) {
     ipcMain.handle(ch, fn);
   }
 
+  function sendI18n() {
+    if (!win || win.isDestroyed()) return;
+    try {
+      const lang = getLang();
+      win.webContents.send("onboarding:lang-change", {
+        lang,
+        strings: minicpmI18n.getStrings(lang),
+      });
+      // Update window title live too.
+      try { win.setTitle(t("onboardingWindowTitle")); } catch {}
+    } catch {}
+  }
+
   return {
     shouldShow,
     open,
     close,
     reset,
+    sendI18n,
     isOpen: () => !!(win && !win.isDestroyed()),
   };
 };

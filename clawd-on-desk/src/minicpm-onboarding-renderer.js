@@ -5,12 +5,13 @@
 //   1 env-check  — disk / network / platform sanity checks
 //   2 model      — pick how to obtain the GGUF: online download OR local
 //                   file. Once the model is in place, warmup runs inline on
-//                   the same panel; "下一步" is unlocked when BOTH are ready.
+//                   the same panel; "Next" is unlocked when BOTH are ready.
 //   3 ready      — handoff to the pet window.
 //
-// Accelerator selection was retired in this redesign — the sidecar auto
-// picks Metal / CUDA / CPU based on the host platform. Settings tab can
-// still override later.
+// Strings come from `minicpm-i18n.js` (loaded as a UMD <script> in
+// onboarding.html). The current language is fetched from the main
+// process via `window.onboarding.getI18n()` and refreshed live on
+// `onboarding:lang-change`.
 
 const STEPS = ["env-check", "model", "ready"];
 
@@ -18,24 +19,29 @@ const el = (id) => document.getElementById(id);
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+const minicpmI18n = (typeof globalThis !== "undefined" && globalThis.ClawdMinicpmI18n) || null;
+let currentLang = "en";
+let t = minicpmI18n ? minicpmI18n.makeTranslator(() => currentLang) : (k) => k;
+
 let currentStep = "env-check";
 let modelStatus = "idle";    // "idle" | "downloading" | "ready"
 let modelSource = null;      // "download" | "local"
 let modelInfo = null;        // { path, sizeBytes } once ready
 let warmupStatus = "idle";   // "idle" | "running" | "ready" | "error"
 let warmupKicked = false;    // guard against double-firing warmup
+let envCheckRan = false;     // re-paint env-check details on lang change
 
-function show(step) {
-  currentStep = step;
-  $$(".panel").forEach((p) => {
-    p.classList.toggle("hidden", p.dataset.panel !== step);
-  });
-  $$(".step").forEach((s) => {
-    const idx = STEPS.indexOf(s.dataset.step);
-    const curIdx = STEPS.indexOf(step);
-    s.classList.toggle("active", idx === curIdx);
-    s.classList.toggle("done", idx < curIdx);
-  });
+// Apply translations to all `data-i18n` elements. Called once on boot
+// and again on every language change.
+function applyStaticTranslations() {
+  const root = document;
+  for (const node of root.querySelectorAll("[data-i18n]")) {
+    const key = node.getAttribute("data-i18n");
+    if (!key) continue;
+    node.textContent = t(key);
+  }
+  try { document.documentElement.setAttribute("lang", currentLang); } catch {}
+  try { document.title = t("onboardingWindowTitle"); } catch {}
 }
 
 function bytesPretty(n) {
@@ -52,11 +58,31 @@ function basename(p) {
   return parts[parts.length - 1] || p;
 }
 
+function formatModelDetail(info) {
+  if (!info || !info.path) return null;
+  const name = basename(info.path);
+  if (info.sizeBytes) {
+    return t("onboardingModelPathHintWithSize", { name, size: bytesPretty(info.sizeBytes) });
+  }
+  return t("onboardingModelPathHint", { name });
+}
+
+function show(step) {
+  currentStep = step;
+  $$(".panel").forEach((p) => {
+    p.classList.toggle("hidden", p.dataset.panel !== step);
+  });
+  $$(".step").forEach((s) => {
+    const idx = STEPS.indexOf(s.dataset.step);
+    const curIdx = STEPS.indexOf(step);
+    s.classList.toggle("active", idx === curIdx);
+    s.classList.toggle("done", idx < curIdx);
+  });
+}
+
 // ── Step 1: env-check ─────────────────────────────────────────────────
-// Each row resolves live from the main process: disk space pulls fs.statfs
-// against userData, chip pulls sysctl / os.cpus(). The detail cell on the
-// right shows the actual values so the user knows exactly what they have.
 async function runEnvCheck() {
+  envCheckRan = true;
   const diskLi = el("check-disk");
   const diskDetail = el("check-disk-detail");
   const platLi = el("check-platform");
@@ -64,8 +90,8 @@ async function runEnvCheck() {
 
   diskLi.classList.remove("ok", "err");
   platLi.classList.remove("ok", "err");
-  diskDetail.textContent = "检测中…";
-  platDetail.textContent = "检测中…";
+  diskDetail.textContent = t("onboardingDetecting");
+  platDetail.textContent = t("onboardingDetecting");
 
   await Promise.all([
     (async () => {
@@ -74,24 +100,26 @@ async function runEnvCheck() {
         const free = Number.isFinite(info.freeBytes) ? bytesPretty(info.freeBytes) : "—";
         const need = Number.isFinite(info.requiredBytes) ? bytesPretty(info.requiredBytes) : "5 GB";
         diskDetail.textContent = info.ok
-          ? `可用 ${free}（需要 ${need}）`
+          ? t("onboardingDiskAvailable", { free, need })
           : (info.error
-              ? `检测失败：${info.error}`
-              : `仅剩 ${free}，需要 ${need}`);
+              ? t("onboardingDiskCheckFail", { err: info.error })
+              : t("onboardingDiskInsufficient", { free, need }));
         diskLi.classList.add(info.ok ? "ok" : "err");
       } catch (err) {
-        diskDetail.textContent = `检测失败：${err && err.message || err}`;
+        diskDetail.textContent = t("onboardingDiskCheckFail", { err: (err && err.message) || err });
         diskLi.classList.add("err");
       }
     })(),
     (async () => {
       try {
         const info = await window.onboarding.platformInfo();
-        const chip = info && info.chip ? info.chip : "未知";
-        platDetail.textContent = info && info.arch ? `${chip}（${info.arch}）` : chip;
+        const chip = info && info.chip ? info.chip : t("onboardingChipUnknown");
+        platDetail.textContent = info && info.arch
+          ? t("onboardingChipFormat", { chip, arch: info.arch })
+          : chip;
         platLi.classList.add(info && info.supported ? "ok" : "err");
       } catch (err) {
-        platDetail.textContent = `检测失败：${err && err.message || err}`;
+        platDetail.textContent = t("onboardingDiskCheckFail", { err: (err && err.message) || err });
         platLi.classList.add("err");
       }
     })(),
@@ -123,50 +151,42 @@ function paintModelCards() {
   dlProgress.classList.add("hidden");
 
   if (modelStatus === "downloading") {
-    // During an active download we lock the other card to avoid races —
-    // partial files + a sidecar swap would corrupt onboarding state.
     dlCard.classList.add("selected");
     localCard.classList.add("disabled");
     dlBtn.disabled = true;
-    dlBtn.textContent = "下载中...";
+    dlBtn.textContent = t("onboardingDownloading");
     localBtn.disabled = true;
-    localBtn.textContent = "选择文件…";
+    localBtn.textContent = t("onboardingLocalPickFile");
     dlProgress.classList.remove("hidden");
     return;
   }
 
   if (modelStatus === "ready") {
-    // Show the selected card with ✓ + filename. The OTHER card stays
-    // fully clickable so the user can switch sources at any time.
     if (modelSource === "download") {
       dlCard.classList.add("selected");
       dlStatus.classList.remove("hidden");
-      dlStatusText.textContent = modelInfo && modelInfo.path
-        ? `${basename(modelInfo.path)}${modelInfo.sizeBytes ? "  ·  " + bytesPretty(modelInfo.sizeBytes) : ""}`
-        : "已下载";
+      dlStatusText.textContent = formatModelDetail(modelInfo) || t("onboardingDownloaded");
       dlBtn.disabled = true;
-      dlBtn.textContent = "已完成";
+      dlBtn.textContent = t("onboardingDownloadDone");
       localBtn.disabled = false;
-      localBtn.textContent = "改为本地…";
+      localBtn.textContent = t("onboardingDownloadSwitchToLocal");
     } else {
       localCard.classList.add("selected");
       localStatus.classList.remove("hidden");
-      localStatusText.textContent = modelInfo && modelInfo.path
-        ? `${basename(modelInfo.path)}${modelInfo.sizeBytes ? "  ·  " + bytesPretty(modelInfo.sizeBytes) : ""}`
-        : "已加载";
+      localStatusText.textContent = formatModelDetail(modelInfo) || t("onboardingLoaded");
       localBtn.disabled = true;
-      localBtn.textContent = "已选择";
+      localBtn.textContent = t("onboardingLocalPicked");
       dlBtn.disabled = false;
-      dlBtn.textContent = "改为下载";
+      dlBtn.textContent = t("onboardingDownloadSwitchToDownload");
     }
     return;
   }
 
   // idle
   dlBtn.disabled = false;
-  dlBtn.textContent = "开始下载";
+  dlBtn.textContent = t("onboardingDownloadStart");
   localBtn.disabled = false;
-  localBtn.textContent = "选择文件…";
+  localBtn.textContent = t("onboardingLocalPickFile");
 }
 
 function paintWarmupRow() {
@@ -187,17 +207,17 @@ function paintWarmupRow() {
   if (warmupStatus === "running" || warmupStatus === "idle") {
     spinner.style.display = "";
     check.style.display = "none";
-    status.textContent = "正在加载模型...";
+    status.textContent = t("onboardingWarmupRunning");
   } else if (warmupStatus === "ready") {
     row.classList.add("done");
     spinner.style.display = "none";
     check.style.display = "";
-    status.textContent = "模型已加载";
+    status.textContent = t("onboardingWarmupReady");
   } else if (warmupStatus === "error") {
     row.classList.add("err");
     spinner.style.display = "none";
     check.style.display = "none";
-    status.textContent = "加载失败";
+    status.textContent = t("onboardingWarmupErrorTitle", { msg: "" });
     retry.classList.remove("hidden");
   }
 }
@@ -235,9 +255,6 @@ async function startModelDownload() {
   const errBox = el("model-error");
   errBox.classList.add("hidden");
 
-  // If a local file was already loaded, the sidecar holds it in memory.
-  // Restart it before downloading so the next warmup picks up the fresh
-  // weights from disk rather than no-op'ing against the stale model.
   const switching = modelStatus === "ready" && modelSource !== "download";
   if (switching) {
     resetWarmup();
@@ -247,22 +264,23 @@ async function startModelDownload() {
   modelStatus = "downloading";
   modelSource = "download";
   paintModelPanel();
-  setProgress(0, "正在连接 Hugging Face...");
+  setProgress(0, t("onboardingDownloadProgressInit"));
 
   const unsub = window.onboarding.onProgress((p) => {
     if (p.event === "download" && p.phase === "transfer") {
       const done = p.bytes_done || 0;
       const total = p.bytes_total || 0;
       const pct = total > 0 ? (done / total) * 100 : 0;
-      setProgress(pct, `${bytesPretty(done)} / ${bytesPretty(total)}${p.file ? "  ·  " + p.file : ""}`);
+      const detail = `${bytesPretty(done)} / ${bytesPretty(total)}${p.file ? "  ·  " + p.file : ""}`;
+      setProgress(pct, detail);
     } else if (p.event === "download" && p.phase === "swap") {
-      setProgress(98, "正在写入磁盘...");
+      setProgress(98, t("onboardingDownloading"));
     } else if (p.event === "download" && p.phase === "complete") {
-      setProgress(100, "下载完成");
+      setProgress(100, t("onboardingDownloadDone"));
     } else if (p.event === "download" && p.phase === "reloaded") {
-      setProgress(100, "已加载");
+      setProgress(100, t("onboardingLoaded"));
     } else if (p.event === "error") {
-      errBox.textContent = `下载失败 (${p.phase}): ${p.message || "未知错误"}`;
+      errBox.textContent = t("onboardingWarmupErrorTitle", { msg: p.message || p.phase || "" });
       errBox.classList.remove("hidden");
     }
   });
@@ -271,7 +289,6 @@ async function startModelDownload() {
   if (unsub) unsub();
 
   if (r && r.ok) {
-    // Re-query state so we get the actual on-disk path + size.
     const state = await window.onboarding.getState().catch(() => null);
     modelStatus = "ready";
     modelSource = "download";
@@ -285,7 +302,7 @@ async function startModelDownload() {
     modelStatus = "idle";
     modelSource = null;
     paintModelPanel();
-    errBox.textContent = (r && r.error) || "下载失败，请检查网络后重试";
+    errBox.textContent = (r && r.error) || t("onboardingWarmupErrorTitle", { msg: "" });
     errBox.classList.remove("hidden");
   }
 }
@@ -294,8 +311,6 @@ async function pickLocalModel() {
   const errBox = el("model-error");
   errBox.classList.add("hidden");
 
-  // Same logic as startModelDownload: restart sidecar before warming up
-  // if we're switching away from a previously-loaded model.
   const switching = modelStatus === "ready" && modelSource !== "local";
 
   const r = await window.onboarding.pickLocalModel();
@@ -310,7 +325,7 @@ async function pickLocalModel() {
     paintModelPanel();
     void runWarmupInline();
   } else if (r && !r.canceled) {
-    errBox.textContent = r.error || "选择失败";
+    errBox.textContent = r.error || t("onboardingWarmupErrorTitle", { msg: "" });
     errBox.classList.remove("hidden");
   }
 }
@@ -333,8 +348,7 @@ async function runWarmupInline() {
 
   const unsub = window.onboarding.onProgress((p) => {
     if (p.event === "error" && p.phase && p.phase !== "download") {
-      // Surface warmup-related errors in the same box so they're visible.
-      errBox.textContent = `${p.phase} 失败: ${p.message}`;
+      errBox.textContent = t("onboardingWarmupErrorTitle", { msg: `${p.phase}: ${p.message}` });
       errBox.classList.remove("hidden");
     }
   });
@@ -347,15 +361,47 @@ async function runWarmupInline() {
     errBox.classList.add("hidden");
   } else {
     warmupStatus = "error";
-    errBox.textContent = (r && r.error) || "模型加载失败";
+    errBox.textContent = t("onboardingWarmupErrorTitle", { msg: (r && r.error) || "" });
     errBox.classList.remove("hidden");
   }
   paintWarmupRow();
   updateNextBtn();
 }
 
+// ── Live language change ──────────────────────────────────────────────
+function applyLang(lang) {
+  if (typeof lang !== "string" || !lang) return;
+  currentLang = lang;
+  applyStaticTranslations();
+  // Re-paint dynamic UI areas in the new language.
+  if (envCheckRan) {
+    void runEnvCheck();
+  }
+  if (currentStep === "model") {
+    paintModelPanel();
+  }
+}
+
+async function bootstrapI18n() {
+  let initial = "en";
+  try {
+    if (window.onboarding && typeof window.onboarding.getI18n === "function") {
+      const payload = await window.onboarding.getI18n();
+      if (payload && typeof payload.lang === "string") initial = payload.lang;
+    }
+  } catch {}
+  currentLang = initial;
+  applyStaticTranslations();
+  if (window.onboarding && typeof window.onboarding.onLangChange === "function") {
+    window.onboarding.onLangChange((payload) => {
+      if (payload && typeof payload.lang === "string") applyLang(payload.lang);
+    });
+  }
+}
+
 // ── Wire up navigation ────────────────────────────────────────────────
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
+  await bootstrapI18n();
   show("env-check");
   void runEnvCheck();
 

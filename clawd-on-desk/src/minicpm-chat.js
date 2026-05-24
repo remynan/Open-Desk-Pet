@@ -408,9 +408,9 @@ class Sidecar {
     // We need either the prebuilt gateway binary or the source tree
     // (with a Python venv) to spawn.
     if (!this.sidecarBin && !this.sidecarDir) {
-      throw new Error(
-        "找不到 sidecar。打包模式下应内置 sidecar-bin/，开发模式请 cd minicpm-sidecar && uv sync。"
-      );
+      const err = new Error("sidecar binary not found");
+      err.minicpmI18nKey = "chatSidecarMissingBin";
+      throw err;
     }
 
     // Both the binary and `python -m gateway` accept the same flags;
@@ -451,9 +451,9 @@ class Sidecar {
     } else {
       const python = locatePython(this.sidecarDir);
       if (!python) {
-        throw new Error(
-          "找不到 Python 解释器。请安装应用打包版（推荐），或 cd minicpm-sidecar && uv sync。"
-        );
+        const err = new Error("Python interpreter not found");
+        err.minicpmI18nKey = "chatSidecarMissingPython";
+        throw err;
       }
       this.log(`[minicpm-chat] spawn ${python} -m gateway --port ${this.port}`);
       proc = spawn(python, ["-m", "gateway", ...argsCommon], {
@@ -525,13 +525,18 @@ class Sidecar {
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline) {
       if (!this.proc) {
-        throw new Error(`Python 进程提前退出。stderr 末尾：\n${this._stderrTailString(1500)}`);
+        const err = new Error(`Python process exited prematurely. stderr tail:\n${this._stderrTailString(1500)}`);
+        err.minicpmI18nKey = "chatSidecarPyExited";
+        err.minicpmI18nParams = { tail: this._stderrTailString(1500) };
+        throw err;
       }
       if (await this.isHealthy()) return { status: "started" };
       await new Promise((r) => setTimeout(r, 500));
     }
     this.stop();
-    throw new Error("等待 Python 服务就绪超时 (90s)。");
+    const err = new Error("Timed out waiting for Python service (90s)");
+    err.minicpmI18nKey = "chatSidecarTimeout";
+    throw err;
   }
 
   stop() {
@@ -615,6 +620,30 @@ module.exports = function initMinicpmChat(ctx) {
   const port = Number(process.env.MINICPM_PORT || DEFAULT_PORT);
   const host = process.env.MINICPM_HOST || DEFAULT_HOST;
   const log = (msg) => { try { console.log(msg); } catch {} };
+
+  // ── i18n bridge ──────────────────────────────────────────────────────
+  // ctx.getLang() returns the *effective* UI language. Used to translate
+  // sidecar errors (raised with a `minicpmI18nKey` annotation) and to
+  // provide the chat renderer with its initial dictionary + classifier
+  // few-shots over IPC.
+  const minicpmI18n = require("./minicpm-i18n");
+  const getLang = () => {
+    try {
+      if (ctx && typeof ctx.getLang === "function") {
+        const v = ctx.getLang();
+        if (typeof v === "string" && v) return v;
+      }
+    } catch {}
+    return "en";
+  };
+  const tr = minicpmI18n.makeTranslator(getLang);
+  function localizeError(err) {
+    if (!err) return "";
+    if (err.minicpmI18nKey) {
+      return tr(err.minicpmI18nKey, err.minicpmI18nParams || {});
+    }
+    return err.message || String(err);
+  }
 
   if (sidecarBin) log(`[minicpm-chat] using packaged sidecar binary: ${sidecarBin}`);
 
@@ -1612,64 +1641,41 @@ module.exports = function initMinicpmChat(ctx) {
       ? data.last_summary.trim()
       : "";
 
-    // Build the event description. When a `summary` is present we include it
-    // so the model can react to *what AI just did* rather than just the topic.
+    // Build the event description in the user's UI language. The
+    // narration system prompt + situation templates live in
+    // `minicpm-i18n.js` so non-Chinese users get prompts the model can
+    // actually narrate in.
+    const lang = getLang();
+    const narration = minicpmI18n.getNarration(lang);
+    const subject = title
+      ? minicpmI18n.makeTranslator(() => lang, minicpmI18n.NARRATION)("subjectQuoted", { title })
+      : (niceCwd
+          ? minicpmI18n.makeTranslator(() => lang, minicpmI18n.NARRATION)("subjectFromCwd", { cwd: niceCwd })
+          : "");
+    const tnar = minicpmI18n.makeTranslator(() => lang, minicpmI18n.NARRATION);
     let situation;
-    // Unified, agent-neutral framing. The old branches said "围绕X写完
-    // 代码" for non-Cursor agents, which misframed casual chats as code
-    // sessions and pushed the model into "继续帮主人" mode. Now everything
-    // is "刚结束跟 AI 关于X的对话" regardless of agent — works for both
-    // code and chat.
-    const subject = title ? `「${title}」` : (niceCwd ? `${niceCwd} 项目` : "");
     if (data.event === "StopFailure") {
       situation = subject
-        ? `主人和 AI 处理${subject}的时候出错了`
-        : `主人那边的 AI 报错了`;
+        ? tnar("eventStopFailureWithSubject", { subject })
+        : tnar("eventStopFailureNoSubject");
     } else if (data.event === "Notification") {
       situation = subject
-        ? `主人在${subject}这事里卡在一个确认弹窗`
-        : `主人卡在一个确认弹窗`;
+        ? tnar("eventNotificationWithSubject", { subject })
+        : tnar("eventNotificationNoSubject");
     } else {
       situation = subject
-        ? `主人刚结束跟 AI 关于${subject}的对话`
-        : `主人那边的对话刚结束了`;
+        ? tnar("eventStopWithSubject", { subject })
+        : tnar("eventStopNoSubject");
     }
     if (summary) {
-      situation += `。AI 最后说：${summary}`;
+      situation += tnar("eventLastSaid", { summary });
     }
 
     // Narration always runs the base model (`disable_adapter: true`) so
     // the persona LoRA doesn't bias output toward cuteness over info
-    // density. The few-shots now teach the **transcribe-don't-roleplay**
-    // distinction: the pet is reporting AI's output to its owner, NOT
-    // continuing the AI's reply.
+    // density.
     return {
-      system:
-        "你是主人电脑上的小桌宠。主人正在跟一个 AI 助手聊天 / 写代码,你看不到全程,只能看到事件描述和 AI 最后说的那句话。\n" +
-        "你的任务:把 AI 那句话压缩成一句话,告诉主人「AI 刚才告诉你/做了什么」。" +
-        "你是 旁观者,不是 AI 本身,不要替 AI 接话。\n\n" +
-        "硬要求:\n" +
-        "- 一句话,12-28 个汉字\n" +
-        "- 必须复述 AI 那句话里的具体内容(火锅/拉面 / token 写反 / 缺什么环境变量 / ...)\n" +
-        "- 视角是「向主人转述 AI」,不要冒充 AI 自己,不要说「我帮你...」「让我...」\n" +
-        "- 不要给主人提建议,不要问主人问题,不要发表评论\n" +
-        "- 不要提 AI 助手的具体产品名\n" +
-        "- 只输出这一句话本身,无前缀、无引号、无 markdown\n\n" +
-        "示例:\n\n" +
-        "事件:主人刚结束跟 AI 关于「晚饭吃啥」的对话。AI 最后说:推荐火锅、拉面、烤肉、川菜小炒,看你想吃哪种。\n" +
-        "回复:AI 推荐了火锅、拉面、烤肉和川菜\n\n" +
-        "事件:主人刚结束跟 AI 关于「晚饭吃啥」的对话。AI 最后说:火锅好选择!\n" +
-        "回复:AI 也觉得火锅是好选择\n\n" +
-        "事件:主人刚结束跟 AI 关于「修登录 bug」的对话。AI 最后说:token 过期判断写反了,已修。\n" +
-        "回复:登录 bug 修好了,是 token 判断写反\n\n" +
-        "事件:主人刚结束跟 AI 关于「重构数据层」的对话。AI 最后说:把 user 表拆成 user 和 user_profile 两张。\n" +
-        "回复:AI 把 user 表拆成 user 和 user_profile 了\n\n" +
-        "事件:主人和 AI 处理「部署到 staging」的时候出错了。AI 最后说:部署失败,缺少 STAGING_API_KEY 环境变量。\n" +
-        "回复:部署挂了,差一个 STAGING_API_KEY\n\n" +
-        "事件:主人刚结束跟 AI 关于「雨天音乐」的对话。AI 最后说:推荐久石让《Summer》、坂本龙一《Merry Christmas Mr.Lawrence》。\n" +
-        "回复:AI 推荐了久石让和坂本龙一两首钢琴曲\n\n" +
-        "事件:主人刚结束跟 AI 关于「文档检索」的对话\n" +
-        "回复:AI 那边的对话结束了",
+      system: narration.systemPrompt,
       user: `事件:${situation}\n回复:`,
     };
   }
@@ -1934,8 +1940,12 @@ module.exports = function initMinicpmChat(ctx) {
         const r = await sidecar.ensureRunning(opts.modelDir || getEffectiveModelDir());
         return { ok: true, status: r.status, url: sidecar.baseUrl() };
       } catch (err) {
-        return { ok: false, error: String(err && err.message || err) };
+        return { ok: false, error: localizeError(err) };
       }
+    },
+    "minicpm:get-i18n": async () => {
+      const lang = getLang();
+      return minicpmI18n.getMinicpmI18nPayload(lang);
     },
     "minicpm:resize": (_evt, { width, height } = {}) => {
       width = Math.max(MIN_WIDTH, Math.min(SPEAK_MAX_WIDTH, Math.round(Number(width) || ASK_WIDTH)));
@@ -2634,6 +2644,16 @@ module.exports = function initMinicpmChat(ctx) {
     return sidecar.ensureRunning(getEffectiveModelDir());
   }
 
+  function sendI18n() {
+    if (!bubble || bubble.isDestroyed()) return;
+    try {
+      bubble.webContents.send(
+        "minicpm:lang-change",
+        minicpmI18n.getMinicpmI18nPayload(getLang())
+      );
+    } catch {}
+  }
+
   return {
     open,
     toggle,
@@ -2649,6 +2669,7 @@ module.exports = function initMinicpmChat(ctx) {
     shutdown,
     restartSidecar,
     ensureSidecarReady,
+    sendI18n,
     getSidecarUrl: () => sidecar.baseUrl(),
     getBridgeDir: () => bridgeDir,
     getSidecarBinary: () => sidecarBin,

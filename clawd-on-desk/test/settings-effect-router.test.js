@@ -48,6 +48,8 @@ function createHarness(options = {}) {
     sendToRenderer: (...args) => calls.push(["sendToRenderer", ...args]),
     sendDashboardI18n: () => calls.push(["sendDashboardI18n"]),
     sendSessionHudI18n: () => calls.push(["sendSessionHudI18n"]),
+    sendMinicpmChatI18n: () => calls.push(["sendMinicpmChatI18n"]),
+    sendMinicpmOnboardingI18n: () => calls.push(["sendMinicpmOnboardingI18n"]),
     emitSessionSnapshot: (...args) => calls.push(["emitSessionSnapshot", ...args]),
     cleanStaleSessions: () => calls.push(["cleanStaleSessions"]),
     syncPermissionShortcuts: () => calls.push(["syncPermissionShortcuts"]),
@@ -147,6 +149,8 @@ describe("settings-effect-router", () => {
       ["updateMirrors", { lang: "zh", sessionAliases: { "local|claude|1": "work" } }],
       ["sendDashboardI18n"],
       ["sendSessionHudI18n"],
+      ["sendMinicpmChatI18n"],
+      ["sendMinicpmOnboardingI18n"],
       ["emitSessionSnapshot", { force: true }],
       ["rebuildAllMenus"],
     ]);

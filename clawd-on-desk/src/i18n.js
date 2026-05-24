@@ -121,6 +121,7 @@ const i18n = {
     shortcutErrorConflict: "Conflict with {other}. Try another key.",
     shortcutErrorSystemConflict: "Already in use by system or another app.",
     shortcutErrorRegistrationFailed: "Saved, but currently not active due to system conflict. Rebind or try again later.",
+    menuMinicpmChat: "MiniCPM Chat",
     quit: "Quit",
   },
   zh: {
@@ -236,6 +237,7 @@ const i18n = {
     shortcutErrorConflict: "与 {other} 冲突，请换一个组合键。",
     shortcutErrorSystemConflict: "该组合键已被系统或其他应用占用。",
     shortcutErrorRegistrationFailed: "已保存，但当前因系统冲突未生效。请重新绑定或稍后再试。",
+    menuMinicpmChat: "MiniCPM 聊天",
     quit: "退出",
   },
   "zh-TW": {
@@ -354,6 +356,7 @@ const i18n = {
     shortcutErrorSystemConflict: "此組合鍵已被系統或其他應用程式占用。",
     shortcutErrorRegistrationFailed:
       "已儲存，但目前因系統衝突未生效。請重新綁定或稍後再試。",
+    menuMinicpmChat: "MiniCPM 聊天",
     quit: "結束",
   },
   ko: {
@@ -469,6 +472,7 @@ const i18n = {
     shortcutErrorConflict: "{other} 와(과) 충돌합니다. 다른 키를 사용해 주세요.",
     shortcutErrorSystemConflict: "시스템 또는 다른 앱이 이미 사용 중입니다.",
     shortcutErrorRegistrationFailed: "저장되었지만 현재는 시스템 충돌로 활성화되지 않았습니다. 다시 바인딩하거나 나중에 다시 시도해 주세요.",
+    menuMinicpmChat: "MiniCPM 채팅",
     quit: "종료",
   },
   ja: {
@@ -584,6 +588,7 @@ const i18n = {
     shortcutErrorConflict: "{other} と競合しています。別のキーを試してください。",
     shortcutErrorSystemConflict: "システムまたは他のアプリで既に使用されています。",
     shortcutErrorRegistrationFailed: "保存しましたが、システム競合により現在は無効です。再バインドするか後で再試行してください。",
+    menuMinicpmChat: "MiniCPM チャット",
     quit: "終了",
   },
 };

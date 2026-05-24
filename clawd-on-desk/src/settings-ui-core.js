@@ -163,8 +163,20 @@
     return shortcuts[actionId] ?? null;
   }
 
+  function getStoredLang() {
+    return (state.snapshot && state.snapshot.lang) || "system";
+  }
+
+  // Effective UI language: resolves "system" via navigator.language so the
+  // settings panel and all renderer-side translation lookups always render
+  // in one of the five concrete UI langs.
   function getLang() {
-    return (state.snapshot && state.snapshot.lang) || "en";
+    const stored = getStoredLang();
+    const resolver = typeof globalThis !== "undefined" ? globalThis.ClawdLocaleResolver : null;
+    if (resolver && typeof resolver.resolveEffectiveLang === "function") {
+      return resolver.resolveEffectiveLang(stored, () => navigator && navigator.language);
+    }
+    return stored === "system" ? "en" : stored;
   }
 
   function readThemeOverrideMap(themeId) {
@@ -1008,6 +1020,7 @@
     readAgentPermissionMode,
     getShortcutValue,
     getLang,
+    getStoredLang,
     readThemeOverrideMap,
     hasAnyThemeOverride,
   };

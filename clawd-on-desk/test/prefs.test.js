@@ -678,7 +678,7 @@ describe("prefs.save", () => {
     };
     prefs.save(p, dirty);
     const written = JSON.parse(fs.readFileSync(p, "utf8"));
-    assert.strictEqual(written.lang, "en");
+    assert.strictEqual(written.lang, "system");
     assert.strictEqual(written.x, 0);
   });
 

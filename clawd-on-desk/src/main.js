@@ -91,6 +91,7 @@ const SIZES = {
 const prefsModule = require("./prefs");
 const { createSettingsController } = require("./settings-controller");
 const { createTranslator, i18n } = require("./i18n");
+const { resolveEffectiveLang } = require("./locale-resolver");
 const {
   getBubblePolicy,
   isAllBubblesHidden,
@@ -229,7 +230,14 @@ const _settingsController = createSettingsController({
 // menu.js / state.js / etc. don't have to round-trip through the controller.
 // Updated by the settings-effect-router subscriber below; never
 // assign directly.
-let lang = _settingsController.get("lang");
+//
+// `storedLang` is what's persisted in prefs ("system" | "en" | "zh" | …)
+// — this is what the Settings picker shows. `lang` is the *effective*
+// language we actually render in (always one of the 5 UI langs); it's
+// derived from `storedLang` via the locale resolver. When stored is
+// "system", `lang` reflects whatever `app.getLocale()` says.
+let storedLang = _settingsController.get("lang");
+let lang = resolveEffectiveLang(storedLang, () => app.getLocale());
 const translate = createTranslator(() => lang);
 
 function getDashboardI18nPayload() {
@@ -1112,6 +1120,9 @@ const _minicpmChat = require("./minicpm-chat")({
     try { return getHitRectScreen(); } catch { return null; }
   },
   getNearestWorkArea,
+  // Effective UI language; used for sidecar error i18n + chat renderer
+  // bootstrap + narration system prompts.
+  getLang: () => lang,
 });
 const openMinicpmChat = () => _minicpmChat.open();
 
@@ -1121,6 +1132,7 @@ const openMinicpmChat = () => _minicpmChat.open();
 const _minicpmOnboarding = require("./minicpm-onboarding")({
   getSidecarUrl: () => _minicpmChat.getSidecarUrl(),
   getChat: () => _minicpmChat,
+  getLang: () => lang,
   ensureSidecarRunning: async () => {
     // Triggered by the wizard before /api/update-apply / /api/warmup.
     // Use the error-propagating variant: the user-facing warmup() wraps
@@ -1416,7 +1428,8 @@ const { t, buildContextMenu, buildTrayMenu, rebuildAllMenus, createTray,
 
 // ── Settings effect router ──
 const SETTINGS_MIRROR_SETTERS = {
-  lang: (v) => { lang = v; }, size: (v) => { currentSize = v; }, showTray: (v) => { showTray = v; },
+  lang: (v) => { storedLang = v; lang = resolveEffectiveLang(v, () => app.getLocale()); },
+  size: (v) => { currentSize = v; }, showTray: (v) => { showTray = v; },
   showDock: (v) => { showDock = v; }, manageClaudeHooksAutomatically: (v) => { manageClaudeHooksAutomatically = v; },
   autoStartWithClaude: (v) => { autoStartWithClaude = v; }, openAtLogin: (v) => { openAtLogin = v; },
   bubbleFollowPet: (v) => { bubbleFollowPet = v; }, sessionHudEnabled: (v) => { sessionHudEnabled = v; },
@@ -1447,6 +1460,18 @@ const settingsEffectRouter = createSettingsEffectRouter({
   sendToRenderer,
   sendDashboardI18n: () => sendDashboardI18n(),
   sendSessionHudI18n: () => sendSessionHudI18n(),
+  sendMinicpmChatI18n: () => {
+    try {
+      if (_minicpmChat && typeof _minicpmChat.sendI18n === "function") _minicpmChat.sendI18n();
+    } catch {}
+  },
+  sendMinicpmOnboardingI18n: () => {
+    try {
+      if (_minicpmOnboarding && typeof _minicpmOnboarding.sendI18n === "function") {
+        _minicpmOnboarding.sendI18n();
+      }
+    } catch {}
+  },
   emitSessionSnapshot: (options) => _state.emitSessionSnapshot(options),
   cleanStaleSessions: () => _state.cleanStaleSessions(),
   syncPermissionShortcuts,
@@ -1971,6 +1996,11 @@ if (!gotTheLock) {
     // Must run before createWindow() so the first menu draw sees the
     // hydrated value rather than the schema default.
     hydrateSystemBackedSettings();
+
+    // `app.getLocale()` is only fully reliable after the app is ready —
+    // re-resolve the effective lang once, so the initial menu / window
+    // titles always reflect the correct OS locale on first launch.
+    lang = resolveEffectiveLang(storedLang, () => app.getLocale());
 
     permDebugLog = path.join(app.getPath("userData"), "permission-debug.log");
     updateDebugLog = path.join(app.getPath("userData"), "update-debug.log");

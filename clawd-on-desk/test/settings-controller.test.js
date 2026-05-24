@@ -28,7 +28,8 @@ describe("createSettingsController construction", () => {
 
   it("loads defaults from missing file", () => {
     const ctrl = createSettingsController({ prefsPath: makeTempPath() });
-    assert.strictEqual(ctrl.get("lang"), "en");
+    // Default `lang` is "system" (resolved at runtime by locale-resolver).
+    assert.strictEqual(ctrl.get("lang"), "system");
     assert.strictEqual(ctrl.get("soundMuted"), false);
     assert.strictEqual(ctrl.isLocked(), false);
   });
@@ -192,7 +193,7 @@ describe("applyUpdate", () => {
     const ctrl = createSettingsController({ prefsPath: p });
     const r = await ctrl.applyUpdate("lang", "klingon");
     assert.strictEqual(r.status, "error");
-    assert.strictEqual(ctrl.get("lang"), "en");
+    assert.strictEqual(ctrl.get("lang"), "system");
     // File should not exist (no commit, no persist)
     assert.strictEqual(fs.existsSync(p), false);
   });
@@ -279,12 +280,12 @@ describe("applyBulk", () => {
     assert.strictEqual(r.status, "error");
     // Neither field committed
     assert.strictEqual(ctrl.get("x"), 0);
-    assert.strictEqual(ctrl.get("lang"), "en");
+    assert.strictEqual(ctrl.get("lang"), "system");
   });
 
   it("returns noop:true when nothing changed", async () => {
     const ctrl = createSettingsController({ prefsPath: makeTempPath() });
-    const r = await ctrl.applyBulk({ lang: "en", soundMuted: false });
+    const r = await ctrl.applyBulk({ lang: "system", soundMuted: false });
     assert.strictEqual(r.noop, true);
   });
 
@@ -381,7 +382,7 @@ describe("applyCommand", () => {
     assert.strictEqual(r.status, "error");
     assert.ok(/klingon|lang/.test(r.message));
     // Store must remain at the default (unchanged)
-    assert.strictEqual(ctrl.get("lang"), "en");
+    assert.strictEqual(ctrl.get("lang"), "system");
   });
 
   it("rejects commit keys unknown to the updateRegistry", async () => {
@@ -660,8 +661,8 @@ describe("object-form entries (validate + effect pre-commit gate)", () => {
         },
       },
     });
-    // Default lang is "en"; set to "en" again should noop.
-    const r = await ctrl.applyUpdate("lang", "en");
+    // Default lang is "system"; set to "system" again should noop.
+    const r = await ctrl.applyUpdate("lang", "system");
     assert.strictEqual(r.noop, true);
     assert.strictEqual(validateCalls, 0);
     assert.strictEqual(effectCalls, 0);
@@ -723,7 +724,7 @@ describe("hydrate (system → prefs import, no effect)", () => {
 
   it("noop when value already matches", async () => {
     const ctrl = createSettingsController({ prefsPath: makeTempPath() });
-    const r = await ctrl.hydrate({ lang: "en" }); // default
+    const r = await ctrl.hydrate({ lang: "system" }); // default
     assert.strictEqual(r.noop, true);
   });
 });

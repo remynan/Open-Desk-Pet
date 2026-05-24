@@ -20,6 +20,7 @@ const MAIN_PROCESS = path.join(SRC_DIR, "main.js");
 const SETTINGS_IPC = path.join(SRC_DIR, "settings-ipc.js");
 const DOCTOR_IPC = path.join(SRC_DIR, "doctor-ipc.js");
 const { SUPPORTED_LANGS } = require("../src/i18n");
+const { STORED_LANGS } = require("../src/locale-resolver");
 const TAB_MODULES = [
   path.join(SRC_DIR, "settings-tab-general.js"),
   path.join(SRC_DIR, "settings-tab-agents.js"),
@@ -406,8 +407,10 @@ function loadGeneralLanguageRowForTest({
         en: {
           rowLanguage: "Language",
           rowLanguageDesc: "Language desc",
+          langSystem: "System default",
           langEnglish: "English",
           langChinese: "Chinese",
+          langTraditionalChinese: "Traditional Chinese",
           langKorean: "Korean",
           langJapanese: "Japanese",
           toastSaveFailed: "Failed: ",
@@ -415,8 +418,10 @@ function loadGeneralLanguageRowForTest({
         zh: {
           rowLanguage: "Language",
           rowLanguageDesc: "Language desc",
+          langSystem: "System default",
           langEnglish: "English",
           langChinese: "Chinese",
+          langTraditionalChinese: "Traditional Chinese",
           langKorean: "Korean",
           langJapanese: "Japanese",
           toastSaveFailed: "Failed: ",
@@ -1362,7 +1367,7 @@ describe("settings renderer browser environment", () => {
 
     assert.ok(new RegExp(
       String.raw`const LANGUAGE_OPTIONS = \[` +
-      SUPPORTED_LANGS.map((lang) => String.raw`"${lang}"`).join(String.raw`,\s*`) +
+      STORED_LANGS.map((lang) => String.raw`"${lang}"`).join(String.raw`,\s*`) +
       String.raw`\];`
     ).test(generalSource));
     assert.ok(generalSource.includes(`class="language-picker"`));
@@ -1397,18 +1402,23 @@ describe("settings renderer browser environment", () => {
     assert.strictEqual(harness.getLangValue().textContent, "English");
     assert.strictEqual(harness.getLangMenu().attributes["aria-hidden"], "true");
     const options = harness.getLangOptions();
-    assert.strictEqual(options.length, SUPPORTED_LANGS.length);
-    for (let i = 0; i < SUPPORTED_LANGS.length; i++) {
-      assert.strictEqual(options[i].dataset.lang, SUPPORTED_LANGS[i]);
+    // STORED_LANGS = ["system", "en", "zh", "zh-TW", "ko", "ja"]
+    assert.strictEqual(options.length, STORED_LANGS.length);
+    for (let i = 0; i < STORED_LANGS.length; i++) {
+      assert.strictEqual(options[i].dataset.lang, STORED_LANGS[i]);
       assert.strictEqual(options[i].tabIndex, -1);
     }
-    assert.strictEqual(options[0].attributes["aria-selected"], "true");
+    // options: [system, en, zh, zh-TW, ko, ja]; "en" is selected
+    const enIdx = STORED_LANGS.indexOf("en");
+    const zhIdx = STORED_LANGS.indexOf("zh");
+    const systemIdx = STORED_LANGS.indexOf("system");
+    assert.strictEqual(options[enIdx].attributes["aria-selected"], "true");
 
     trigger.dispatchEvent({ type: "click" });
     assert.strictEqual(picker.classList.contains("open"), true);
     assert.strictEqual(harness.getLangMenu().attributes["aria-hidden"], "false");
-    assert.strictEqual(options[0].tabIndex, 0);
-    options[1].dispatchEvent({ type: "click" });
+    assert.strictEqual(options[enIdx].tabIndex, 0);
+    options[zhIdx].dispatchEvent({ type: "click" });
 
     assert.deepStrictEqual(
       harness.updateCalls,
@@ -1421,7 +1431,7 @@ describe("settings renderer browser environment", () => {
     assert.strictEqual(harness.getLangValue().textContent, "Chinese");
 
     trigger.dispatchEvent({ type: "click" });
-    options[1].dispatchEvent({ type: "click" });
+    options[zhIdx].dispatchEvent({ type: "click" });
     assert.deepStrictEqual(
       harness.updateCalls,
       [{ key: "lang", value: "zh" }],
@@ -1429,14 +1439,14 @@ describe("settings renderer browser environment", () => {
     );
 
     trigger.dispatchEvent({ type: "click" });
-    options[0].dispatchEvent({ type: "click" });
+    options[enIdx].dispatchEvent({ type: "click" });
     assert.deepStrictEqual(
       harness.updateCalls,
       [{ key: "lang", value: "zh" }],
       "clicking back to the committed language while pending should not submit a duplicate update"
     );
     assert.strictEqual(harness.getLangValue().textContent, "English");
-    assert.strictEqual(options[0].attributes["aria-selected"], "true");
+    assert.strictEqual(options[enIdx].attributes["aria-selected"], "true");
 
     harness.core.ops.applyChanges({
       changes: { lang: "zh" },
@@ -1444,7 +1454,17 @@ describe("settings renderer browser environment", () => {
     });
     assert.strictEqual(harness.getContentRenderCount(), 2);
     assert.strictEqual(harness.getLangValue().textContent, "Chinese");
-    assert.strictEqual(harness.getLangOptions()[1].attributes["aria-selected"], "true");
+    assert.strictEqual(harness.getLangOptions()[zhIdx].attributes["aria-selected"], "true");
+
+    // Sanity: clicking the "system" option submits "system" as the stored value.
+    const trigger2 = harness.getLangTrigger();
+    trigger2.dispatchEvent({ type: "click" });
+    harness.getLangOptions()[systemIdx].dispatchEvent({ type: "click" });
+    assert.deepStrictEqual(
+      harness.updateCalls.slice(-1),
+      [{ key: "lang", value: "system" }],
+      "selecting 'System default' should persist 'system' to prefs"
+    );
   });
 
   it("supports keyboard language selection and reverts when saving fails", async () => {
@@ -1458,7 +1478,8 @@ describe("settings renderer browser environment", () => {
     trigger.dispatchEvent(createKeyboardEventForTest("ArrowDown"));
     assert.strictEqual(harness.getLangPicker().classList.contains("open"), true);
     const options = harness.getLangOptions();
-    options[1].dispatchEvent(createKeyboardEventForTest("Enter"));
+    const zhIdx = STORED_LANGS.indexOf("zh");
+    options[zhIdx].dispatchEvent(createKeyboardEventForTest("Enter"));
     await Promise.resolve();
 
     assert.deepStrictEqual(harness.updateCalls, [{ key: "lang", value: "zh" }]);

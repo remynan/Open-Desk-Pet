@@ -28,4 +28,12 @@ contextBridge.exposeInMainWorld("onboarding", {
     // Return an unsubscribe handle for completeness
     return () => ipcRenderer.removeListener("onboarding:progress", listener);
   },
+
+  // i18n: initial fetch + live updates
+  getI18n: () => ipcRenderer.invoke("onboarding:get-i18n"),
+  onLangChange: (cb) => {
+    const listener = (_e, payload) => { try { cb(payload || {}); } catch {} };
+    ipcRenderer.on("onboarding:lang-change", listener);
+    return () => ipcRenderer.removeListener("onboarding:lang-change", listener);
+  },
 });

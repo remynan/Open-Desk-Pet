@@ -28,6 +28,14 @@ contextBridge.exposeInMainWorld("minicpm", {
   // pipeline. Pass `null` to unload.
   loadAdapter: (pathOrNull) => ipcRenderer.invoke("minicpm-settings:load-adapter", { path: pathOrNull }),
 
+  // i18n: initial fetch + live updates
+  getI18n: () => ipcRenderer.invoke("minicpm:get-i18n"),
+  onLangChange: (cb) => {
+    const listener = (_e, payload) => { try { cb(payload || {}); } catch {} };
+    ipcRenderer.on("minicpm:lang-change", listener);
+    return () => ipcRenderer.removeListener("minicpm:lang-change", listener);
+  },
+
   // Messages from main → renderer
   onOpen:           (cb) => ipcRenderer.on("minicpm:cmd-open",            (_e, payload) => cb(payload || {})),
   onDismiss:        (cb) => ipcRenderer.on("minicpm:cmd-dismiss",         () => cb()),

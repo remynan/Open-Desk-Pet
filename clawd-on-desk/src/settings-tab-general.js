@@ -49,7 +49,7 @@
   let helpers = null;
   let ops = null;
 
-  const LANGUAGE_OPTIONS = ["en", "zh", "zh-TW", "ko", "ja"];
+  const LANGUAGE_OPTIONS = ["system", "en", "zh", "zh-TW", "ko", "ja"];
 
   function t(key) {
     return helpers.t(key);
@@ -174,6 +174,7 @@
   }
 
   const LANGUAGE_LABEL_KEYS = {
+    "system": "langSystem",
     "en": "langEnglish",
     "zh": "langChinese",
     "zh-TW": "langTraditionalChinese",
@@ -205,7 +206,8 @@
     const valueEl = row.querySelector(".language-picker-value");
     const menu = row.querySelector(".language-picker-menu");
     trigger.setAttribute("aria-label", t("rowLanguage"));
-    const currentLang = readers.getLang();
+    const getStoredLang = readers.getStoredLang || readers.getLang;
+    const currentLang = getStoredLang();
     let activeLang = currentLang;
     const getLabel = (lang) => t(LANGUAGE_LABEL_KEYS[lang] || "langEnglish");
     const options = [];
@@ -249,7 +251,7 @@
         setOpen(false);
         return;
       }
-      if (next === readers.getLang()) {
+      if (next === getStoredLang()) {
         syncDisplay(next);
         setOpen(false);
         return;
@@ -257,7 +259,7 @@
       syncDisplay(next);
       setOpen(false);
       const revertIfStillPending = () => {
-        if (activeLang === next) syncDisplay(readers.getLang());
+        if (activeLang === next) syncDisplay(getStoredLang());
       };
       window.settingsAPI.update("lang", next).then((result) => {
         if (!result || result.status !== "ok") {

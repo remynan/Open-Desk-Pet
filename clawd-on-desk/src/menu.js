@@ -155,7 +155,7 @@ module.exports = function initMenu(ctx) {
     items.push(
       { type: "separator" },
       {
-        label: "MiniCPM Chat",
+        label: t("menuMinicpmChat"),
         click: () => {
           if (typeof ctx.openMinicpmChat === "function") ctx.openMinicpmChat();
         },
@@ -318,7 +318,7 @@ module.exports = function initMenu(ctx) {
       },
       { type: "separator" },
       {
-        label: "MiniCPM Chat",
+        label: t("menuMinicpmChat"),
         click: () => {
           if (typeof ctx.openMinicpmChat === "function") ctx.openMinicpmChat();
         },
