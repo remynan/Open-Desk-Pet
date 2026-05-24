@@ -41,6 +41,15 @@ NOT bundled with this repository; users download GGUF files at first
 launch via the in-app onboarding wizard. Use of the weights is governed
 by OpenBMB's published model license.
 
+### NekoQA-30K fine-tuning dataset
+
+The bundled neko-style LoRA adapter in
+[`adapters/lora_nekoqa_adapter_20260515_0738/`](adapters/lora_nekoqa_adapter_20260515_0738/)
+was fine-tuned using
+[liumindmind/NekoQA-30K](https://huggingface.co/datasets/liumindmind/NekoQA-30K),
+a Hugging Face text dataset with 30,834 cat-girl QA samples. The Hugging
+Face dataset card lists the dataset license as Apache-2.0.
+
 ### clawd-on-desk subproject
 
 `clawd-on-desk/` is a vendored fork that ships its own
