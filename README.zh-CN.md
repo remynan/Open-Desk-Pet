@@ -5,7 +5,7 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg" alt="License"></a>
   <a href="https://huggingface.co/openbmb/MiniCPM5-1B-GGUF"><img src="https://img.shields.io/badge/Model-MiniCPM5--1B-green" alt="MiniCPM5-1B"></a>
-  <img src="https://img.shields.io/badge/Platform-macOS%20Apple%20Silicon-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey" alt="Platform">
 </p>
 
 <p align="center">
@@ -33,22 +33,31 @@
 
 | 项目 | 推荐配置 |
 | --- | --- |
-| 系统 | macOS 14.0 或更高版本 |
-| 芯片 | Apple Silicon (M1/M2/M3/M4) |
-| 磁盘空间 | 应用和默认模型约 2 GB |
+| macOS | 14.0+，Apple Silicon (M1/M2/M3/M4)，约 2 GB 磁盘空间 |
+| Windows | x64，需 Vulkan 支持，约 2 GB 磁盘空间 |
 | 网络 | 首次启动需要联网下载模型；已有本地模型文件时可手动选择 |
+
+> macOS Apple Silicon 是当前主要验证平台；Windows 已提供安装包，欢迎反馈问题。
 
 ### 安装
 
-1. 前往 [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) 下载最新 macOS `.dmg`。
+**macOS**
+
+1. 前往 [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) 下载最新 `MiniCPM Desk Pet-*-arm64.dmg`。
 2. 打开 DMG，将 **MiniCPM Desk Pet** 拖入 `Applications`。
 3. 启动应用，按引导完成设置。
 
-如果 macOS 阻止首次打开，可以右键应用选择 **Open**。必要时也可以移除隔离标记：
+如果 macOS 阻止首次打开，可以右键应用选择 **打开**。必要时也可以移除隔离标记：
 
 ```bash
 xattr -cr /Applications/MiniCPM\ Desk\ Pet.app
 ```
+
+**Windows**
+
+1. 前往 [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) 下载最新 `.exe` 安装程序。
+2. 运行安装向导，按提示完成安装。
+3. 启动应用，按引导完成设置。
 
 ### 首次启动
 
@@ -64,10 +73,10 @@ MiniCPM Desk Pet 内置完整首次启动流程：
 
 打开悬浮聊天气泡，就可以直接和 MiniCPM 对话。设置完成后，日常聊天不需要依赖远程推理服务。
 
-常用快捷键：
+常用快捷键（macOS 为 `Cmd`，Windows 为 `Ctrl`）：
 
-- `Cmd+Shift+M`：打开或关闭 MiniCPM 聊天气泡
-- `Cmd+Shift+T`：显示或隐藏思考模式
+- `Cmd/Ctrl+Shift+M`：打开或关闭 MiniCPM 聊天气泡
+- `Cmd/Ctrl+Shift+T`：显示或隐藏思考模式
 - `Esc`：输入框聚焦时关闭气泡
 
 ### 工作时的状态反应
@@ -89,7 +98,7 @@ MiniCPM 设置页支持：
 
 ## 路线图
 
-- 扩展 Windows 和 Linux 验证。
+- 扩展 Linux 验证。
 - 增加更多人格预设。
 - 优化模型下载提示、重试和诊断体验。
 - 缩短首次启动耗时，减小应用体积。
@@ -97,7 +106,7 @@ MiniCPM 设置页支持：
 
 ## 已知限制
 
-- 当前主要验证和发布目标是 macOS Apple Silicon。
+- 当前主要验证和发布目标是 macOS Apple Silicon；Windows 已提供安装包，如遇问题欢迎反馈。
 - 首次启动需要联网下载模型，除非你手动提供本地模型文件。
 - 回复速度会受到芯片、内存压力和模型选择影响。
 - Coding agent 状态反应依赖各工具自身的集成方式，不同版本之间可能存在差异。
