@@ -85,8 +85,7 @@
     },
     "win": {
       "icon": "assets/icon.ico",
-      "signAndEditExecutable": false,
-      "artifactName": "Clawd-on-Desk-Setup-${version}-${arch}.${ext}",
+      "artifactName": "MiniCPM-Desk-Pet-Setup-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "nsis",

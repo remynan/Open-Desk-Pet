@@ -57,6 +57,13 @@ CMAKE_FLAGS=(
   -DLLAMA_BUILD_EXAMPLES=OFF
   -DLLAMA_BUILD_TOOLS=ON
   -DLLAMA_CURL=OFF
+  # cpp-httplib (vendored in llama.cpp) auto-links OpenSSL when
+  # find_package(OpenSSL) succeeds, producing a binary that depends on
+  # libcrypto/libssl. We don't need HTTPS for the 127.0.0.1-only sidecar,
+  # and on Windows that pulled in vcpkg's libcrypto-3-x64.dll without it
+  # being bundled into bin/win-x64/, so the user got STATUS_DLL_NOT_FOUND
+  # at first launch. Hard-disable discovery for parity across platforms.
+  -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
 )
 
 case "$ACCEL" in

@@ -27,7 +27,14 @@ $flags = @(
   "-DLLAMA_BUILD_TESTS=OFF",
   "-DLLAMA_BUILD_EXAMPLES=OFF",
   "-DLLAMA_BUILD_TOOLS=ON",
-  "-DLLAMA_CURL=OFF"
+  "-DLLAMA_CURL=OFF",
+  # cpp-httplib auto-links OpenSSL when find_package(OpenSSL) succeeds
+  # (which it does once vcpkg's spirv-headers drags it onto CMAKE_PREFIX_PATH),
+  # producing a binary that depends on libcrypto-3-x64.dll / libssl-3-x64.dll.
+  # We don't need HTTPS for the local-only 127.0.0.1 sidecar, and bundling
+  # the vcpkg DLLs into bin/win-x64/ is fragile, so we hard-disable the
+  # discovery instead. Mirrors the unix flag in build-llama.sh.
+  "-DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON"
 )
 switch ($accel) {
   "vulkan" { $flags += "-DGGML_VULKAN=ON" }

@@ -541,9 +541,30 @@ class Sidecar {
 
   stop() {
     if (!this.proc) return;
-    try { this.proc.kill("SIGTERM"); } catch {}
+    const proc = this.proc;
+    const pid = proc.pid;
+
+    if (process.platform === "win32" && pid) {
+      // PyInstaller --onefile spawns a bootloader (the pid we get back from
+      // child_process.spawn) which then launches the actual Python process
+      // as a separate child. Windows doesn't put them in the same job
+      // object, so a plain `proc.kill("SIGTERM")` only terminates the
+      // bootloader — the Python child stays alive holding the gateway
+      // socket on :18765, which then blocks every subsequent respawn with
+      // EADDRINUSE / "llama-server not running". Use taskkill /T to walk
+      // the process tree and kill the bootloader + every descendant
+      // (Python, llama-server, ...) in one shot.
+      try {
+        execFile("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
+      } catch {
+        try { proc.kill("SIGKILL"); } catch {}
+      }
+      return;
+    }
+
+    try { proc.kill("SIGTERM"); } catch {}
     setTimeout(() => {
-      if (this.proc) { try { this.proc.kill("SIGKILL"); } catch {} }
+      if (this.proc === proc) { try { proc.kill("SIGKILL"); } catch {} }
     }, 2000).unref();
   }
 }
