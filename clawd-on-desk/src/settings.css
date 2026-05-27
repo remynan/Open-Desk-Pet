@@ -3645,3 +3645,109 @@ html, body {
     background: rgba(255, 255, 255, 0.06);
   }
 }
+
+/* ── API Configuration input styles ── */
+.minicpm-api-input {
+  width: 100%;
+  max-width: 320px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 6px;
+  background: var(--input-bg, rgba(0, 0, 0, 0.04));
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.minicpm-api-input:focus {
+  outline: none;
+  border-color: var(--accent, #0078d4);
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.15);
+}
+.minicpm-api-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+@media (prefers-color-scheme: dark) {
+  .minicpm-api-input {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  .minicpm-api-input:focus {
+    box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.3);
+  }
+}
+
+/* ── Section box for MiniCPM settings ── */
+.minicpm-section-box {
+  margin-bottom: 16px;
+}
+
+/* ── Section title ── */
+.minicpm-section-title {
+  display: flex;
+  align-items: center;
+  padding: 12px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.minicpm-section-title-text {
+  flex: 1;
+}
+
+/* ── Header styles ── */
+.minicpm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  margin-bottom: 8px;
+}
+.minicpm-header-left {
+  flex: 1;
+}
+.minicpm-header-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.minicpm-header-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.minicpm-header-right {
+  flex: 0 0 auto;
+}
+.minicpm-status-pill-slot {
+  display: inline-flex;
+}
+
+/* ── Advanced section ── */
+.minicpm-advanced-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.minicpm-advanced-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.minicpm-advanced-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+.minicpm-advanced-chevron.is-expanded {
+  transform: rotate(90deg);
+}
+.minicpm-advanced-content {
+  padding-left: 0;
+}

@@ -2,9 +2,10 @@
 
 const pkg = require("../package.json");
 
-const DEFAULT_UPSTREAM_URL = "https://github.com/rullerzhou-afk/clawd-on-desk";
-const DEFAULT_UPSTREAM_LABEL = "clawd-on-desk";
-const MODEL_REPO_URL = "https://huggingface.co/openbmb/MiniCPM5-1B-GGUF";
+const DEFAULT_UPSTREAM_URL = "https://github.com/OpenBMB/MiniCPM-Desk-Pet";
+const DEFAULT_UPSTREAM_LABEL = "MiniCPM Desk Pet";
+const ORIGINAL_AUTHOR = "OpenBMB";
+const FORK_AUTHOR = "remynan";
 
 function normalizeRepoUrl(url) {
   if (!url || typeof url !== "string") return null;
@@ -20,10 +21,10 @@ function parseGitHubRepo(url) {
 }
 
 function extractCopyrightShort(copyright) {
-  if (!copyright) return "\u00a9 2026 OpenBMB";
-  const match = String(copyright).match(/Copyright\s*\u00a9?\s*(\d{4})\s+([^.\n]+)/i);
-  if (match) return `\u00a9 ${match[1]} ${match[2].trim()}`;
-  return "\u00a9 2026 OpenBMB";
+  if (!copyright) return "© 2026 remynan";
+  const match = String(copyright).match(/Copyright\s*©?\s*(\d{4})\s+([^.\n]+)/i);
+  if (match) return `© ${match[1]} ${match[2].trim()}`;
+  return "© 2026 remynan";
 }
 
 const repoUrl = normalizeRepoUrl(pkg.homepage) || normalizeRepoUrl(pkg.repository && pkg.repository.url);
@@ -32,11 +33,11 @@ const upstreamRepoUrl = normalizeRepoUrl(pkg.upstreamRepository) || DEFAULT_UPST
 const upstreamMatch = parseGitHubRepo(upstreamRepoUrl);
 
 module.exports = {
-  appDisplayName: (pkg.build && pkg.build.productName) || "MiniCPM Desk Pet",
+  appDisplayName: (pkg.build && pkg.build.productName) || "Open Desk Pet",
   licenseId: pkg.license || "AGPL-3.0-only",
   copyrightLine: extractCopyrightShort(pkg.build && pkg.build.copyright),
   repoUrl,
-  modelRepoUrl: MODEL_REPO_URL,
+  modelRepoUrl: null, // No local model needed in remote API mode
   releasesLatestUrl: repoUrl ? `${repoUrl}/releases/latest` : null,
   githubOwner: githubRepo ? githubRepo.owner : null,
   githubRepo: githubRepo ? githubRepo.repo : null,
@@ -45,5 +46,10 @@ module.exports = {
     : null,
   upstreamRepoUrl,
   upstreamLabel: (upstreamMatch && upstreamMatch.repo) || DEFAULT_UPSTREAM_LABEL,
-  userAgent: (pkg.build && pkg.build.productName) || "MiniCPM-Desk-Pet",
+  userAgent: (pkg.build && pkg.build.productName) || "Open-Desk-Pet",
+  // Fork information
+  originalAuthor: ORIGINAL_AUTHOR,
+  forkAuthor: FORK_AUTHOR,
+  forkVersion: pkg.version,
+  forkDescription: "Forked from MiniCPM Desk Pet, modified to use remote OpenAI-compatible APIs instead of local llama.cpp.",
 };

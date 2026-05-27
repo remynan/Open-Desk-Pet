@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -c src/settings-i18n.js)",
+      "Bash(node -c src/i18n.js)",
+      "Bash(cd /d \"D:\\\\github\\\\Open-Desk-Pet\\\\clawd-on-desk\")",
+      "Bash(npm start *)",
+      "Bash(py --version)"
+    ]
+  }
+}

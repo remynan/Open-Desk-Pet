@@ -1,3 +1,34 @@
+# v0.7.1-r-r1 — 2026-05-27
+
+## 重大变更：本地 llama.cpp → 远程 OpenAI 兼容 API
+
+### 新增
+
+- 远程 API 支持：支持 OpenAI、DeepSeek、Moonshot 等兼容 API
+- Settings → API 配置页面：Base URL、API Key、Model Name 输入
+- 测试连接功能：直接调用 `/models` 端点验证 API 连接
+- API 配置持久化：保存到用户 prefs 文件
+- 新增 `openai_client.py`：HTTPX 异步客户端，支持 SSE 流式响应
+- Settings 窗口菜单栏：File、Edit、View、Help
+
+### 变更
+
+- 品牌重命名：MiniCPM Desk Pet → Open Desk Pet
+- 简化 Onboarding：移除环境检查和模型下载步骤
+- Sidecar 启动：允许在未配置 API 时启动，显示配置提示
+- 退出处理：Windows 上同步终止 sidecar 进程树
+
+### 移除
+
+- llama.cpp submodule 及本地编译依赖
+- 本地 GGUF 模型文件管理
+- LoRA adapter 相关功能
+- 设备选择（Metal/CUDA/CPU）
+
+### 国际化
+
+- 新增 API 配置相关翻译（en, zh, zh-TW, ko, ja）
+
 # v0.9 — 2026-05-22
 
 ## 主线：仓库目录大扫除 + 开源就绪

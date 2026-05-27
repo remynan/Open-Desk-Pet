@@ -154,8 +154,8 @@ check_environment() {
   green "    ✓ clawd-on-desk/"
 }
 
-ensure_llama_server() {
-  cyan "==> 检查 llama-server..."
+ensure_gateway() {
+  cyan "==> 检查 gateway..."
   local triple
   case "$(uname -s)-$(uname -m)" in
     Darwin-arm64)  triple="mac-arm64" ;;
@@ -164,15 +164,14 @@ ensure_llama_server() {
     Linux-aarch64) triple="linux-arm64" ;;
     *)             triple="unknown" ;;
   esac
-  local bin="$SIDECAR_DIR/bin/$triple/llama-server"
+  local bin="$SIDECAR_DIR/bin/$triple/minicpm-sidecar"
   if [[ -x "$bin" ]]; then
-    green "    ✓ llama-server 已存在 ($bin)"
+    green "    ✓ gateway 已存在 ($bin)"
     return 0
   fi
-  cyan "    首次构建 llama-server（这要 ~5-10 分钟，初始化 submodule + 编译）..."
-  git -C "$HERE" submodule update --init --depth 1 llama.cpp
-  ( cd "$SIDECAR_DIR" && ./scripts/build-llama.sh )
-  green "    ✓ llama-server 已就绪"
+  cyan "    首次构建 gateway..."
+  ( cd "$SIDECAR_DIR" && ./scripts/build-gateway.sh )
+  green "    ✓ gateway 已就绪"
 }
 
 install_python_deps() {
@@ -229,7 +228,7 @@ case "$cmd" in
     ;;
   setup)
     check_environment
-    ensure_llama_server
+    ensure_gateway
     install_python_deps
     install_npm_deps
     green ""
@@ -238,23 +237,22 @@ case "$cmd" in
   start)
     start_pet
     ;;
-  build-llama)
+  build-gateway)
     check_environment
-    git -C "$HERE" submodule update --init --depth 1 llama.cpp
-    ( cd "$SIDECAR_DIR" && ./scripts/build-llama.sh )
+    ( cd "$SIDECAR_DIR" && ./scripts/build-gateway.sh )
     ;;
   run|"")
     check_environment
-    ensure_llama_server
+    ensure_gateway
     install_python_deps
     install_npm_deps
     start_pet
     ;;
   build)
-    # 一站式：vendor 编 llama-server + PyInstaller 编 gateway →
-    # electron-builder 出 dmg。输出位于 clawd-on-desk/dist/*.dmg。
+    # 一站式：PyInstaller 编 gateway → electron-builder 出 dmg。
+    # 输出位于 clawd-on-desk/dist/*.dmg。
     check_environment
-    ensure_llama_server
+    ensure_gateway
     install_python_deps
     install_npm_deps
     cyan "==> 编 gateway + 准备 sidecar-bin..."
@@ -265,7 +263,7 @@ case "$cmd" in
     ;;
   *)
     red "未知命令: $cmd"
-    red "用法: ./go.sh [doctor|setup|start|run|build|build-llama]"
+    red "用法: ./go.sh [doctor|setup|start|run|build|build-gateway]"
     exit 1
     ;;
 esac

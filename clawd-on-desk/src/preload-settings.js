@@ -129,6 +129,13 @@ contextBridge.exposeInMainWorld("settingsAPI", {
 //
 contextBridge.exposeInMainWorld("minicpmSettings", {
   getStatus: () => ipcRenderer.invoke("minicpm-settings:get-status"),
+  getApiConfig: () => ipcRenderer.invoke("minicpm-settings:get-api-config"),
+  saveApiConfig: (payload) => ipcRenderer.invoke("minicpm-settings:save-api-config", payload || {}),
+  testApiConnection: (payload) => ipcRenderer.invoke("minicpm-settings:test-api-connection", payload || {}),
+  getNarrationEnabled: () => ipcRenderer.invoke("minicpm-settings:get-narration-enabled"),
+  setNarrationEnabled: (enabled) => ipcRenderer.invoke("minicpm-settings:set-narration-enabled", { enabled }),
+  getDefaultThinking: () => ipcRenderer.invoke("minicpm-settings:get-default-thinking"),
+  setDefaultThinking: (enabled) => ipcRenderer.invoke("minicpm-settings:set-default-thinking", { enabled }),
   listAdapters: () => ipcRenderer.invoke("minicpm-settings:list-adapters"),
   loadAdapter: (path) => ipcRenderer.invoke("minicpm-settings:load-adapter", { path }),
   checkUpdate: () => ipcRenderer.invoke("minicpm-settings:check-update"),

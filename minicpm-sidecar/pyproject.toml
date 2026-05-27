@@ -1,7 +1,7 @@
 [project]
 name = "minicpm-sidecar-gateway"
 version = "0.1.0"
-description = "Thin FastAPI gateway in front of llama.cpp's llama-server for the MiniCPM desk pet."
+description = "Thin FastAPI gateway for Open Desk Pet, a desktop pet powered by remote OpenAI-compatible APIs."
 requires-python = ">=3.10,<3.13"
 readme = "README.md"
 

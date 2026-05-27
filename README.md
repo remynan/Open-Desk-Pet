@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="assets/readme%20logo.png" alt="MiniCPM Desk Pet" width="760">
+  <img src="assets/readme%20logo.png" alt="Open Desk Pet" width="760">
 </p>
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg" alt="License"></a>
-  <a href="https://huggingface.co/openbmb/MiniCPM5-1B-GGUF"><img src="https://img.shields.io/badge/Model-MiniCPM5--1B-green" alt="MiniCPM5-1B"></a>
+  <img src="https://img.shields.io/badge/Version-0.7.1--r--r1-orange" alt="Version">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey" alt="Platform">
 </p>
 
@@ -13,19 +13,25 @@
 </p>
 
 <p align="center">
-  A local-first desktop pet powered by MiniCPM. Download, complete the guided setup, and chat with a tiny companion that lives on your desktop.
+  A desktop pet powered by remote OpenAI-compatible APIs. Configure your own API endpoint and chat with a tiny companion that lives on your desktop.
 </p>
+
+---
+
+> **Note:** This project is a fork of [MiniCPM Desk Pet](https://github.com/OpenBMB/MiniCPM-Desk-Pet) by **remynan**. 
+> 
+> The main difference: **Open Desk Pet** uses remote OpenAI-compatible APIs (OpenAI, DeepSeek, Moonshot, Ollama, etc.) instead of local llama.cpp inference. This means no local model download, no GPU requirements, and faster setup.
 
 ---
 
 ## Highlights
 
-- **Local by default** — after the model is downloaded, everyday chat runs on your machine.
-- **Zero manual setup** — first launch guides you through environment check, model download, and warm-up.
-- **Desktop companion** — open a floating chat bubble, talk with MiniCPM, and keep the pet on screen while you work.
-- **Agent-aware reactions** — the pet can react to coding activity from tools such as Cursor, Claude Code, and Codex.
-- **Smart model download** — the app can download from Hugging Face or ModelScope and choose the better source for your network.
-- **Persona support** — switch or import character adapters from **Settings -> MiniCPM**.
+- **Remote API powered** — connect to any OpenAI-compatible API service
+- **Zero local model** — no large model files to download or manage
+- **Flexible configuration** — use OpenAI, DeepSeek, Moonshot, local Ollama, or any compatible service
+- **Easy setup** — just configure your API URL, key, and model name
+- **Desktop companion** — open a floating chat bubble and talk with your pet
+- **Agent-aware reactions** — the pet can react to coding activity from tools such as Cursor, Claude Code, and Codex
 
 ## Getting Started
 
@@ -33,83 +39,76 @@
 
 | Item | Recommended |
 | --- | --- |
-| macOS | 14.0+, Apple Silicon (M1/M2/M3/M4), about 2 GB disk space |
-| Windows | x64 with Vulkan support, about 2 GB disk space |
-| Network | Required on first launch unless you already have a local model file |
-
-> macOS Apple Silicon is the primary tested platform. A Windows installer is also available — feedback is welcome.
+| macOS | 14.0+, Apple Silicon or Intel |
+| Windows | x64 |
+| Network | Required for API calls |
 
 ### Installation
 
 **macOS**
 
-1. Go to [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) and download the latest `MiniCPM Desk Pet-*-arm64.dmg`.
-2. Open the DMG and drag **MiniCPM Desk Pet** into `Applications`.
-3. Launch the app and follow the setup guide.
+1. Go to [Releases](https://github.com/remynan/Open-Desk-Pet/releases) and download the latest `Open Desk Pet-*-arm64.dmg`.
+2. Open the DMG and drag **Open Desk Pet** into `Applications`.
+3. Launch the app and configure your API settings.
 
 If macOS blocks the first launch, right-click the app and choose **Open**. If needed, remove the quarantine flag:
 
 ```bash
-xattr -cr /Applications/MiniCPM\ Desk\ Pet.app
+xattr -cr /Applications/Open\ Desk\ Pet.app
 ```
 
 **Windows**
 
-1. Go to [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases) and download the latest `.exe` installer.
+1. Go to [Releases](https://github.com/remynan/Open-Desk-Pet/releases) and download the latest `.exe` installer.
 2. Run the installer and complete the wizard.
-3. Launch the app and follow the setup guide.
+3. Launch the app and configure your API settings.
 
-### First Launch
+### Configuration
 
-MiniCPM Desk Pet includes a complete first-launch guide:
+On first launch, open **Settings → Open Desk Pet** and configure:
 
-**Environment Check** -> **Model Download** -> **Model Warm-up** -> **Ready to Use**
+1. **API Base URL** — your API endpoint (e.g., `https://api.openai.com/v1`)
+2. **API Key** — your API key
+3. **Model Name** — the model to use (e.g., `gpt-4o-mini`, `deepseek-chat`)
 
-The default model is [MiniCPM5-1B-GGUF](https://huggingface.co/openbmb/MiniCPM5-1B-GGUF). You can let the app download it automatically, or choose an existing local `.gguf` file.
+Click **Test Connection** to verify your settings.
 
 ## Features
 
-### Chat With a Local Pet
+### Chat With Your Desktop Pet
 
-Use the floating chat bubble to talk with MiniCPM from your desktop. Once setup is complete, your normal conversations do not need a remote inference service.
+Use the floating chat bubble to talk with your pet from your desktop.
 
 Useful shortcuts (macOS uses `Cmd`, Windows uses `Ctrl`):
 
-- `Cmd/Ctrl+Shift+M` — open or close the MiniCPM chat bubble
+- `Cmd/Ctrl+Shift+M` — open or close the chat bubble
 - `Cmd/Ctrl+Shift+T` — show or hide thinking mode
 - `Esc` — close the bubble when input is focused
 
 ### Reactions While You Work
 
-MiniCPM Desk Pet can stay beside your workspace and react to coding-agent activity: thinking, working, finishing tasks, waiting for attention, or going idle.
+Open Desk Pet can stay beside your workspace and react to coding-agent activity: thinking, working, finishing tasks, waiting for attention, or going idle.
 
-### Model Management
+## Supported API Providers
 
-The MiniCPM settings page lets you:
+Open Desk Pet works with any OpenAI-compatible API:
 
-- download the default model or choose a local model file
-- rerun onboarding
-- manage character/persona adapters
-- restart the local model runtime when needed
+- **OpenAI** — `https://api.openai.com/v1`
+- **DeepSeek** — `https://api.deepseek.com/v1`
+- **Moonshot** — `https://api.moonshot.cn/v1`
+- **Local Ollama** — `http://localhost:11434/v1`
+- **Any OpenAI-compatible service**
 
-### Persona Adapters
+## Differences from MiniCPM Desk Pet
 
-The app includes a neko-style persona adapter. You can switch adapters or import your own from **Settings -> MiniCPM**.
-
-## Roadmap
-
-- Broader Linux validation.
-- More persona presets.
-- Clearer model download diagnostics and retry guidance.
-- Faster first launch and smaller app footprint.
-- Richer desktop-pet narration for long-running coding sessions.
-
-## Known Limitations
-
-- The primary tested release target is macOS Apple Silicon. Windows is supported with a bundled installer; report issues if something does not work on your setup.
-- First launch requires an internet connection unless you provide a local model file.
-- Response speed depends on your chip, memory pressure, and selected model.
-- Coding-agent reactions depend on each tool's integration behavior and may vary by version.
+| Feature | MiniCPM Desk Pet | Open Desk Pet |
+|---------|------------------|---------------|
+| Inference | Local llama.cpp | Remote API |
+| Model | MiniCPM5-1B GGUF | Any OpenAI-compatible model |
+| Disk Space | ~2GB for model | Minimal |
+| GPU | Recommended | Not required |
+| Setup | Download model | Configure API |
+| Offline | Yes | No |
 
 ## Developer Notes
 
@@ -117,12 +116,12 @@ For development setup, packaging, and repository layout, see [`docs/development.
 
 ## Acknowledgments
 
-- Desktop pet UI is based on [rullerzhou-afk/clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk). Full attribution is listed in [`NOTICE.md`](./NOTICE.md).
-- Model weights come from the OpenBMB MiniCPM model family and are downloaded separately.
-- The bundled neko persona uses [liumindmind/NekoQA-30K](https://huggingface.co/datasets/liumindmind/NekoQA-30K) for fine-tuning data.
+- Forked from [MiniCPM Desk Pet](https://github.com/OpenBMB/MiniCPM-Desk-Pet) by OpenBMB
+- Desktop pet UI is based on [rullerzhou-afk/clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk)
+- Full attribution is listed in [`NOTICE.md`](./NOTICE.md)
 
 ## License
 
 This repository is distributed under [GNU AGPL-3.0-only](./LICENSE).
 
-MiniCPM model weights are downloaded separately and governed by the [OpenBMB MiniCPM Model License](https://github.com/OpenBMB/MiniCPM/blob/main/MiniCPM%20Model%20License.md). Artwork, third-party code, and datasets keep their own notices; see [`NOTICE.md`](./NOTICE.md) and [`clawd-on-desk/NOTICE.md`](clawd-on-desk/NOTICE.md).
+Original MiniCPM Desk Pet is licensed under [GNU AGPL-3.0-only](https://github.com/OpenBMB/MiniCPM-Desk-Pet/blob/main/LICENSE).

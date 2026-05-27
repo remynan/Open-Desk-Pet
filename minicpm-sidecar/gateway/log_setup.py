@@ -7,9 +7,9 @@ full traceback for any internal exception always survives.
 
 Log dir resolution (first hit wins):
   1. $MINICPM_LOG_DIR   (Electron sets this in packaged mode)
-  2. macOS  → ~/Library/Logs/MiniCPM Desk Pet/sidecar/
-  3. Linux  → $XDG_STATE_HOME/minicpm-sidecar/ or ~/.local/state/minicpm-sidecar/
-  4. Win    → %LOCALAPPDATA%\\MiniCPM Desk Pet\\logs\\
+  2. macOS  → ~/Library/Logs/Open Desk Pet/sidecar/
+  3. Linux  → $XDG_STATE_HOME/open-desk-pet/ or ~/.local/state/open-desk-pet/
+  4. Win    → %LOCALAPPDATA%\\Open Desk Pet\\logs\\
   5. <gateway pkg dir>/.logs/  (dev fallback)
 """
 
@@ -33,15 +33,15 @@ def resolve_log_dir() -> Path:
         return Path(env).expanduser().resolve()
     system = platform.system()
     if system == "Darwin":
-        return Path.home() / "Library" / "Logs" / "MiniCPM Desk Pet" / "sidecar"
+        return Path.home() / "Library" / "Logs" / "Open Desk Pet" / "sidecar"
     if system == "Linux":
         xdg = os.environ.get("XDG_STATE_HOME")
         base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "state"
-        return base / "minicpm-sidecar"
+        return base / "open-desk-pet"
     if system == "Windows":
         appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
         if appdata:
-            return Path(appdata) / "MiniCPM Desk Pet" / "logs"
+            return Path(appdata) / "Open Desk Pet" / "logs"
     return Path(__file__).resolve().parent.parent / ".logs"
 
 

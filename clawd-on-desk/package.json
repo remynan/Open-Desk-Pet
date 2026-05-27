@@ -1,7 +1,7 @@
 {
-  "name": "minicpm-desk-pet",
-  "version": "0.7.1",
-  "description": "MiniCPM Desk Pet — local-first desktop pet powered by MiniCPM5-0.9B. Forked from clawd-on-desk.",
+  "name": "open-desk-pet",
+  "version": "0.7.1-r-r1",
+  "description": "Open Desk Pet — A desktop pet powered by remote OpenAI-compatible APIs. Forked from MiniCPM Desk Pet (https://github.com/OpenBMB/MiniCPM-Desk-Pet). Author: remynan.",
   "main": "src/main.js",
   "scripts": {
     "start": "node launch.js",
@@ -52,8 +52,8 @@
   "upstreamRepository": "https://github.com/rullerzhou-afk/clawd-on-desk",
   "type": "commonjs",
   "build": {
-    "appId": "com.openbmb.minicpm-desk-pet",
-    "productName": "MiniCPM Desk Pet",
+    "appId": "com.remynan.open-desk-pet",
+    "productName": "Open Desk Pet",
     "copyright": "Copyright © 2026 OpenBMB. Based on clawd-on-desk by rullerzhou-afk (AGPL-3.0-only).",
     "protocols": [
       {
@@ -85,7 +85,7 @@
     },
     "win": {
       "icon": "assets/icon.ico",
-      "artifactName": "MiniCPM-Desk-Pet-Setup-${version}-${arch}.${ext}",
+      "artifactName": "Open-Desk-Pet-Setup-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -161,16 +161,6 @@
           "pyproject.toml",
           ".python-version",
           "README.md"
-        ]
-      },
-      {
-        "from": "../adapters",
-        "to": "adapters",
-        "filter": [
-          "**/*.gguf",
-          "**/README.md",
-          "**/USAGE.md",
-          "**/adapter_config.json"
         ]
       }
     ],

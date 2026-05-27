@@ -26,7 +26,7 @@
 // binary per platform alongside llama-server.
 
 const { BrowserWindow, ipcMain, screen, shell, Menu, app } = require("electron");
-const { spawn, execFile } = require("child_process");
+const { spawn, execFile, execFileSync } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const fs = require("fs");
@@ -281,7 +281,8 @@ function httpJson(method, urlStr, body, timeoutMs = 4000) {
 // ── Sidecar manager ─────────────────────────────────────────────────────────
 
 class Sidecar {
-  constructor({ sidecarDir, sidecarBin, appRoot, port, host, log, logFile, adapterDir }) {
+  constructor({ sidecarDir, sidecarBin, appRoot, port, host, log, logFile, adapterDir,
+                apiMode = "local", apiBaseUrl = "", apiKey = "", apiModel = "" }) {
     // Source tree of minicpm-sidecar; used only in dev when no prebuilt
     // binary is present. Packaged builds ignore it entirely.
     this.sidecarDir = sidecarDir || null;
@@ -312,6 +313,11 @@ class Sidecar {
     this._fileStream = null;
     this._fileSizeBudget = 2 * 1024 * 1024; // 2 MB before rotate
     this._fileBytesWritten = 0;
+    // API mode configuration
+    this.apiMode = apiMode;
+    this.apiBaseUrl = apiBaseUrl;
+    this.apiKey = apiKey;
+    this.apiModel = apiModel;
   }
 
   _openLogStream() {
@@ -419,7 +425,17 @@ class Sidecar {
       "--host", this.host,
       "--port", String(this.port),
     ];
-    if (initialModelDir) argsCommon.push("--model", initialModelDir);
+
+    // Add API mode specific arguments
+    if (this.apiMode === "remote") {
+      argsCommon.push("--api-mode", "remote");
+      if (this.apiBaseUrl) argsCommon.push("--api-base-url", this.apiBaseUrl);
+      if (this.apiKey) argsCommon.push("--api-key", this.apiKey);
+      if (this.apiModel) argsCommon.push("--api-model", this.apiModel);
+    } else {
+      // Local mode: pass model directory
+      if (initialModelDir) argsCommon.push("--model", initialModelDir);
+    }
 
     const env = {
       ...process.env,
@@ -436,6 +452,11 @@ class Sidecar {
       // gateway then refrains from passing any --lora flag, keeping
       // memory minimal for users who never opt in to a persona.
       MINICPM_ACTIVE_ADAPTER: this.activeAdapterPath || process.env.MINICPM_ACTIVE_ADAPTER || "",
+      // API mode environment variables (alternative to CLI args)
+      MINICPM_API_MODE: this.apiMode || "local",
+      MINICPM_API_BASE_URL: this.apiBaseUrl || "",
+      MINICPM_API_KEY: this.apiKey || "",
+      MINICPM_API_MODEL: this.apiModel || "",
     };
 
     let proc;
@@ -443,7 +464,7 @@ class Sidecar {
       // Production path: a self-contained gateway binary. No Python
       // interpreter required on the host. The gateway itself locates
       // and spawns the llama-server binary sitting next to it.
-      this.log(`[minicpm-chat] spawn binary ${this.sidecarBin} --port ${this.port}`);
+      this.log(`[minicpm-chat] spawn binary ${this.sidecarBin} --port ${this.port} --api-mode ${this.apiMode}`);
       proc = spawn(this.sidecarBin, argsCommon, {
         cwd: path.dirname(this.sidecarBin),
         env,
@@ -455,7 +476,7 @@ class Sidecar {
         err.minicpmI18nKey = "chatSidecarMissingPython";
         throw err;
       }
-      this.log(`[minicpm-chat] spawn ${python} -m gateway --port ${this.port}`);
+      this.log(`[minicpm-chat] spawn ${python} -m gateway --port ${this.port} --api-mode ${this.apiMode}`);
       proc = spawn(python, ["-m", "gateway", ...argsCommon], {
         cwd: this.sidecarDir,
         env,
@@ -544,6 +565,9 @@ class Sidecar {
     const proc = this.proc;
     const pid = proc.pid;
 
+    // Clear reference so subsequent calls are no-ops
+    this.proc = null;
+
     if (process.platform === "win32" && pid) {
       // PyInstaller --onefile spawns a bootloader (the pid we get back from
       // child_process.spawn) which then launches the actual Python process
@@ -555,7 +579,11 @@ class Sidecar {
       // the process tree and kill the bootloader + every descendant
       // (Python, llama-server, ...) in one shot.
       try {
-        execFile("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
+        // Use synchronous execFileSync to ensure process is killed before we return
+        execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+          windowsHide: true,
+          timeout: 5000,
+        });
       } catch {
         try { proc.kill("SIGKILL"); } catch {}
       }
@@ -1007,10 +1035,35 @@ module.exports = function initMinicpmChat(ctx) {
     }
   } catch {}
 
+  // ── API Mode Configuration ─────────────────────────────────────────────
+  // Read API mode settings from prefs. Supports both local (llama.cpp) and
+  // remote (OpenAI-compatible API) modes.
+  function readApiModeConfig() {
+    const raw = readMinicpmPrefsRaw();
+    return {
+      apiMode: raw.api_mode || "local",
+      apiBaseUrl: raw.api_base_url || "",
+      apiKey: raw.api_key || "",
+      apiModel: raw.api_model || "",
+    };
+  }
+
+  const apiConfig = readApiModeConfig();
+  const isRemoteMode = apiConfig.apiMode === "remote";
+
+  if (isRemoteMode) {
+    log(`[minicpm-chat] Using remote API mode: ${apiConfig.apiBaseUrl}, model: ${apiConfig.apiModel}`);
+  }
+
   const sidecar = new Sidecar({
     sidecarDir, sidecarBin, appRoot, port, host, log,
     logFile: sidecarLogPath,
     adapterDir,
+    // Remote API configuration
+    apiMode: apiConfig.apiMode,
+    apiBaseUrl: apiConfig.apiBaseUrl,
+    apiKey: apiConfig.apiKey,
+    apiModel: apiConfig.apiModel,
   });
   // Refresh `sidecar.activeAdapterPath` from prefs every time we're about
   // to spawn. Lets the user pick a persona, restart the sidecar from
@@ -2059,12 +2112,136 @@ module.exports = function initMinicpmChat(ctx) {
       // adapter load, etc). 5s keeps the probe still cheap but resilient to
       // that micro-jitter.
       const health = await httpJson("GET", `${sidecar.baseUrl()}/api/health`, null, 5000).catch(() => null);
+      const healthData = health ? health.json : null;
       return {
         sidecarUrl: sidecar.baseUrl(),
-        healthy: !!(health && health.json && health.json.ok),
-        health: health ? health.json : null,
+        healthy: !!(healthData && healthData.ok),
+        alive: !!(healthData && healthData.alive),
+        ok: !!(healthData && healthData.ok),
+        health: healthData,
         narration: narrationEnabled,
+        // API mode info
+        api_mode: healthData ? healthData.api_mode : "remote",
+        api_base_url: healthData ? healthData.api_base_url : null,
+        api_model: healthData ? healthData.api_model : null,
+        model_name: healthData ? healthData.model_name : null,
+        model_dir: healthData ? healthData.model_dir : null,
       };
+    },
+    "minicpm-settings:save-api-config": async (_evt, payload) => {
+      // Save API configuration to prefs file
+      if (!payload || typeof payload !== "object") {
+        return { ok: false, error: "Invalid payload" };
+      }
+      try {
+        const current = readMinicpmPrefsRaw();
+        if (payload.api_base_url !== undefined) current.api_base_url = payload.api_base_url;
+        if (payload.api_key !== undefined) current.api_key = payload.api_key;
+        if (payload.api_model !== undefined) current.api_model = payload.api_model;
+        if (payload.api_mode !== undefined) current.api_mode = payload.api_mode;
+        writeMinicpmPrefsRaw(current);
+        log(`[minicpm] saved API config: base_url=${payload.api_base_url}, model=${payload.api_model}`);
+
+        // Restart sidecar to apply new config
+        const newConfig = readApiModeConfig();
+        sidecar.apiMode = newConfig.apiMode;
+        sidecar.apiBaseUrl = newConfig.apiBaseUrl;
+        sidecar.apiKey = newConfig.apiKey;
+        sidecar.apiModel = newConfig.apiModel;
+        sidecar.stop();
+        await new Promise((r) => setTimeout(r, 600));
+        await sidecar.ensureRunning(getEffectiveModelDir());
+
+        return { ok: true };
+      } catch (err) {
+        log(`[minicpm] save API config failed: ${err && err.message}`);
+        return { ok: false, error: err && err.message };
+      }
+    },
+    "minicpm-settings:get-api-config": async () => {
+      const config = readApiModeConfig();
+      return {
+        api_mode: config.apiMode,
+        api_base_url: config.apiBaseUrl,
+        api_key: config.apiKey, // Note: we return this for UI, but display should mask it
+        api_model: config.apiModel,
+      };
+    },
+    "minicpm-settings:test-api-connection": async (_evt, payload) => {
+      const { api_base_url, api_key, api_model } = payload || {};
+      if (!api_base_url) {
+        return { ok: false, error: "API Base URL is required" };
+      }
+
+      try {
+        // Test connection by calling /models endpoint
+        const url = api_base_url.replace(/\/+$/, "") + "/models";
+        const headers = { "Content-Type": "application/json" };
+        if (api_key) headers["Authorization"] = `Bearer ${api_key}`;
+
+        const https = require("https");
+        const http = require("http");
+        const client = url.startsWith("https") ? https : http;
+
+        return await new Promise((resolve) => {
+          const req = client.get(url, {
+            headers,
+            timeout: 10000,
+          }, (res) => {
+            let data = "";
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                try {
+                  const parsed = JSON.parse(data);
+                  const models = parsed.data || parsed.models || [];
+                  log(`[minicpm] API test success: ${models.length} models found`);
+                  resolve({ ok: true, models: models.map(m => m.id || m).slice(0, 10) });
+                } catch {
+                  resolve({ ok: true, raw: data.substring(0, 200) });
+                }
+              } else {
+                resolve({ ok: false, error: `HTTP ${res.statusCode}: ${data.substring(0, 100)}` });
+              }
+            });
+          });
+          req.on("error", (err) => {
+            resolve({ ok: false, error: err.message });
+          });
+          req.on("timeout", () => {
+            req.destroy();
+            resolve({ ok: false, error: "Request timeout (10s)" });
+          });
+        });
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    },
+    "minicpm-settings:get-narration-enabled": async () => {
+      return { enabled: narrationEnabled };
+    },
+    "minicpm-settings:set-narration-enabled": async (_evt, payload) => {
+      const on = !!(payload && payload.enabled);
+      narrationEnabled = on;
+      try {
+        mergeMinicpmPrefs({ narration_enabled: on });
+      } catch (err) {
+        log(`[minicpm] save narration_enabled failed: ${err && err.message}`);
+      }
+      return { ok: true, enabled: on };
+    },
+    "minicpm-settings:get-default-thinking": async () => {
+      const params = getChatParams();
+      return { enabled: !!params.thinking };
+    },
+    "minicpm-settings:set-default-thinking": async (_evt, payload) => {
+      const on = !!(payload && payload.enabled);
+      try {
+        mergeMinicpmPrefs({ thinking: on });
+      } catch (err) {
+        log(`[minicpm] save thinking failed: ${err && err.message}`);
+      }
+      return { ok: true, enabled: on };
     },
     "minicpm-settings:list-adapters": async () => {
       // Gateway is the source of truth for the *physical* adapter set
@@ -2232,6 +2409,14 @@ module.exports = function initMinicpmChat(ctx) {
     },
     "minicpm-settings:restart-sidecar": async () => {
       try {
+        // Re-read API config before restart
+        const newConfig = readApiModeConfig();
+        sidecar.apiMode = newConfig.apiMode;
+        sidecar.apiBaseUrl = newConfig.apiBaseUrl;
+        sidecar.apiKey = newConfig.apiKey;
+        sidecar.apiModel = newConfig.apiModel;
+        log(`[minicpm] restart sidecar with API config: mode=${newConfig.apiMode}, base_url=${newConfig.apiBaseUrl}, model=${newConfig.apiModel}`);
+
         sidecar.stop();
         await new Promise((r) => setTimeout(r, 600));
         const r = await sidecar.ensureRunning(getEffectiveModelDir());

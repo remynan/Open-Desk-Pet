@@ -1,4 +1,4 @@
-# Contributing to MiniCPM Desk Pet
+# Contributing to Open Desk Pet
 
 Thanks for your interest in this project. This file is the operational
 entry point for developers; deeper background lives in
@@ -13,37 +13,34 @@ entry point for developers; deeper background lives in
 > exact upstream commit we forked from.
 
 > Looking to just use the app? Grab a prebuilt installer from
-> [Releases](https://github.com/OpenBMB/MiniCPM-Desk-Pet/releases). This
+> [Releases](https://github.com/remynan/Open-Desk-Pet/releases). This
 > document is only relevant if you plan to modify the code.
 
 ## Quickstart (dev mode)
 
 ```bash
-git clone git@github.com:OpenBMB/MiniCPM-Desk-Pet.git
-cd MiniCPM-Desk-Pet
+git clone git@github.com:remynan/Open-Desk-Pet.git
+cd Open-Desk-Pet
 
-./go.sh doctor    # check that node 18+, uv, cmake are present
-./go.sh setup     # install deps + first-time build of llama-server (~5–10 min)
+./go.sh doctor    # check that node 18+, uv are present
+./go.sh setup     # install deps
 ./go.sh           # run sidecar + Electron pet in foreground
 
-# Or out a packaged installer (mac arm64 dmg):
+# Or build a packaged installer:
 ./go.sh build
 ```
 
-The first launch will offer to download a GGUF model from Hugging Face
-via the onboarding wizard. Alternatively drop a `.gguf` into `models/`
-before starting `./go.sh`.
+The first launch will prompt you to configure your OpenAI-compatible API
+settings in the Settings panel.
 
 ## Repository layout
 
 ```
-MiniCPM-Desk-Pet/
+Open-Desk-Pet/
 ├── clawd-on-desk/      Electron desktop pet (vendored fork)
-├── minicpm-sidecar/    llama.cpp + FastAPI gateway (inference service)
-├── adapters/           LoRA persona adapters (.gguf + safetensors source)
-├── docs/               Developer docs + archived v0.7 design notes
+├── minicpm-sidecar/    FastAPI gateway (OpenAI API proxy)
+├── docs/               Developer docs
 ├── skills/             Cursor Agent Skills (dev deployment helper)
-├── models/             GGUF model files (gitignored)
 └── go.sh               One-shot dev launcher + build entry point
 ```
 
@@ -72,30 +69,29 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 - `chore: ...` — tooling, dependencies, build, docs
 - `docs: ...` — documentation only
 
-Scope optional, e.g. `feat(sidecar): add /api/load-adapter endpoint`.
+Scope optional, e.g. `feat(sidecar): add new API endpoint`.
 
 ## Pull request checklist
 
-- [ ] Branch is rebased on the latest `minicpm-pet` (or target branch)
+- [ ] Branch is rebased on the latest `main`
 - [ ] `npm test` and `uv run pytest -q` pass locally
 - [ ] User-facing changes have a one-line entry in
       [CHANGELOG.md](CHANGELOG.md) under an upcoming version section
 - [ ] If you touch onboarding, sidecar lifecycle, or packaging, please
       include a short test plan (commands run, platform verified) in
       the PR description
-- [ ] No model weights, `.venv`, `node_modules`, or `dist/` artifacts
-      committed
+- [ ] No `.venv`, `node_modules`, or `dist/` artifacts committed
 
 ## Issue templates
 
-See `.github/ISSUE_TEMPLATE/` (TBD) for bug-report / feature-request
-forms. For now, please include:
+See `.github/ISSUE_TEMPLATE/` for bug-report / feature-request forms.
+Please include:
 
 - OS + architecture (e.g. macOS 14.5 / arm64)
 - App version (from About menu) or git commit if running from source
 - Steps to reproduce + observed vs expected behaviour
 - Relevant log excerpts from
-  `~/Library/Application Support/Clawd on Desk/logs/main.log` (macOS)
+  `~/Library/Application Support/Open Desk Pet/logs/main.log` (macOS)
   or the equivalent on Linux/Windows
 
 ## License
